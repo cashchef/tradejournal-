@@ -14,6 +14,11 @@ const TV_SYMBOLS = {
 
 const TICKER_PAIRS = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","GBP/JPY","XAU/USD","BTC/USD","ETH/USD"];
 
+const tvURL = (pair) => {
+  const sym = TV_SYMBOLS[pair] || "FX:EURUSD";
+  return `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(sym)}`;
+};
+
 const empty = {
   pair:"EUR/USD", direction:"Long", entry:"", exit:"",
   lots:"0.01", session:"London", strategy:"Trend Follow",
@@ -233,6 +238,9 @@ export default function App() {
           <button onClick={() => setDark(d => !d)} style={{ background:"none", border:`1px solid ${th.border2}`, color:th.muted, borderRadius:8, padding:"7px 11px", cursor:"pointer", fontSize:15 }}>
             {dark ? "☀️" : "🌙"}
           </button>
+          <a href="https://www.tradingview.com/chart/" target="_blank" rel="noopener noreferrer" style={{ background:"none", border:"1px solid #166534", color:"#22c55e", borderRadius:8, padding:"9px 12px", fontWeight:700, fontSize:13, textDecoration:"none", display:"inline-flex", alignItems:"center", gap:5 }}>
+            📊 TradingView
+          </a>
           <button onClick={openNew} style={{ background:"#f59e0b", color:"#000", border:"none", borderRadius:8, padding:"9px 14px", fontWeight:700, cursor:"pointer", fontSize:13 }}>
             + New Trade
           </button>
@@ -284,6 +292,9 @@ export default function App() {
                         <button onClick={() => setChart(t.pair)} style={{ background:"none", border:`1px solid ${th.border2}`, color:"#f59e0b", borderRadius:5, padding:"2px 8px", fontSize:11, cursor:"pointer", fontFamily:"inherit", fontWeight:600 }}>
                           📊 Chart
                         </button>
+                        <a href={tvURL(t.pair)} target="_blank" rel="noopener noreferrer" style={{ background:"#1a2a1a", border:"1px solid #166534", color:"#22c55e", borderRadius:5, padding:"2px 8px", fontSize:11, cursor:"pointer", fontFamily:"inherit", fontWeight:600, textDecoration:"none" }}>
+                          🌐 TradingView
+                        </a>
                       </div>
                       <div style={{ fontSize:12, color:th.muted, marginTop:4 }}>{t.date} · {t.session} · {t.strategy}</div>
                       <div style={{ fontSize:12, color:th.muted, fontFamily:"monospace", marginTop:5 }}>
