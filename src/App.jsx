@@ -189,14 +189,29 @@ function Calculator({ dark, th }) {
 
 // ── Economic Calendar Tab ─────────────────────────────────────
 function CalendarTab({ dark }) {
-  const src = `https://sslecal2.investing.com?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&features=datepicker,timezone&countries=25,32,6,37,72,22,17,39,14,10,35&calType=week&timeZone=Africa/Nairobi&lang=1&theme=${dark?"dark":"white"}&fontSize=13`;
+  const muted  = dark ? "#666" : "#94a3b8";
+  const border = dark ? "#1f1f1f" : "#e2e8f0";
   return (
     <div>
-      <div style={{ fontSize:12,color:"#555",marginBottom:10 }}>Live economic calendar — impact events that move markets.</div>
-      <div style={{ borderRadius:12,overflow:"hidden",border:"1px solid #1f1f1f" }}>
-        <iframe src={src} style={{ width:"100%",height:"600px",border:"none" }} title="Economic Calendar" />
+      <div style={{ fontSize:12, color:muted, marginBottom:10 }}>
+        Live Forex Factory economic calendar — high/medium/low impact events updated in real time.
       </div>
-      <div style={{ fontSize:11,color:"#444",marginTop:8,textAlign:"center" }}>Powered by Investing.com</div>
+      <div style={{ borderRadius:12, overflow:"hidden", border:`1px solid ${border}`, marginBottom:12 }}>
+        <iframe
+          src="https://www.forexfactory.com/calendar#week"
+          style={{ width:"100%", height:"640px", border:"none" }}
+          title="Forex Factory Calendar"
+        />
+      </div>
+      <div style={{ textAlign:"center" }}>
+        <a href="https://www.forexfactory.com/calendar" target="_blank" rel="noopener noreferrer"
+          style={{ display:"inline-flex", alignItems:"center", gap:6, background:"#f59e0b", color:"#000", borderRadius:8, padding:"10px 18px", fontWeight:700, fontSize:13, textDecoration:"none" }}>
+          🌐 Open Forex Factory
+        </a>
+        <div style={{ fontSize:11, color:muted, marginTop:8 }}>
+          If the calendar doesn't load above, tap the button to open it directly.
+        </div>
+      </div>
     </div>
   );
 }
@@ -547,6 +562,7 @@ export default function App() {
 
         {/* ── CALENDAR ── */}
         {tab==="calendar" && <CalendarTab dark={dark} />}
+
       </div>
 
       {/* ── Trade Modal ── */}
