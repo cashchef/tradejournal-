@@ -111,21 +111,43 @@ function Ticker({ dark }) {
   const bg=dark?"#060606":"#f0f4f8", border=dark?"#1a1a1a":"#e2e8f0";
   const items=[...TICKER_PAIRS,...TICKER_PAIRS];
   return (
-    <div style={{ background:bg,borderBottom:`1px solid ${border}`,height:36,overflow:"hidden",display:"flex",alignItems:"center",position:"relative" }}>
-      <style>{`@keyframes mq{from{transform:translateX(0)}to{transform:translateX(-50%)}}.tkr{display:flex;animation:mq 50s linear infinite;white-space:nowrap}.tkr:hover{animation-play-state:paused}`}</style>
+    <div style={{ background:bg,borderBottom:`1px solid ${border}`,height:46,overflow:"hidden",display:"flex",alignItems:"center",position:"relative" }}>
+      <style>{`@keyframes mq{from{transform:translateX(0)}to{transform:translateX(-50%)}}.tkr{display:flex;animation:mq 55s linear infinite;white-space:nowrap;align-items:center}.tkr:hover{animation-play-state:paused}`}</style>
       {err
         ? <span style={{ fontSize:11,color:"#f59e0b",padding:"0 14px" }}>⚠ Price feed unavailable — tap ⟳</span>
         : <div className="tkr">{items.map((label,i)=>{
-            const price=prices[label],p0=prev[label];
-            const up=p0&&price>p0,dn=p0&&price<p0;
-            const col=up?"#22c55e":dn?"#ef4444":dark?"#999":"#555";
-            return <span key={i} style={{ padding:"0 16px",fontSize:12,fontFamily:"monospace",color:col,borderRight:`1px solid ${border}` }}>
-              <span style={{ color:dark?"#444":"#94a3b8",marginRight:5 }}>{label}</span>
-              {price?<>{up?"▲":dn?"▼":""} {price.toLocaleString()}</>:<span style={{color:dark?"#222":"#ccc"}}>···</span>}
-            </span>;
+            const price=prices[label], p0=prev[label];
+            const up=p0&&price>p0, dn=p0&&price<p0;
+            const isJPY=label.includes("JPY");
+            const isBig=label.includes("BTC")||label.includes("ETH")||label.includes("XAU");
+            const dp=isBig?2:isJPY?3:5;
+            const diff=(p0&&price) ? +(price-p0).toFixed(dp) : null;
+            const pct=(p0&&price) ? +((price-p0)/p0*100).toFixed(2) : null;
+            const priceCol=up?"#22c55e":dn?"#ef4444":dark?"#ccc":"#333";
+            return (
+              <span key={i} style={{ padding:"0 14px",display:"inline-flex",alignItems:"center",gap:6,borderRight:`1px solid ${border}`,height:46 }}>
+                <span style={{ fontSize:11,color:dark?"#555":"#94a3b8",fontFamily:"monospace" }}>{label}</span>
+                {price
+                  ? <span style={{ fontSize:12,fontFamily:"monospace",fontWeight:600,color:priceCol }}>{price.toLocaleString()}</span>
+                  : <span style={{ fontSize:12,color:dark?"#222":"#ccc" }}>···</span>
+                }
+                {diff!==null && diff!==0 && (
+                  <span style={{
+                    fontSize:10,fontFamily:"monospace",fontWeight:700,
+                    background:up?"#0d2b1a":"#2b0d0d",
+                    color:up?"#22c55e":"#ef4444",
+                    border:`1px solid ${up?"#166534":"#991b1b"}`,
+                    borderRadius:4,padding:"2px 6px",
+                    display:"inline-flex",alignItems:"center",gap:2
+                  }}>
+                    {up?"▲":"▼"} {diff>0?"+":""}{diff} <span style={{opacity:0.7}}>({pct>0?"+":""}{pct}%)</span>
+                  </span>
+                )}
+              </span>
+            );
           })}</div>
       }
-      <button onClick={load} style={{ position:"absolute",right:6,background:"none",border:"none",cursor:"pointer",fontSize:15,color:dark?"#444":"#aaa",padding:4 }}>⟳</button>
+      <button onClick={load} title="Refresh" style={{ position:"absolute",right:6,background:"none",border:"none",cursor:"pointer",fontSize:15,color:dark?"#555":"#aaa",padding:4 }}>⟳</button>
     </div>
   );
 }
