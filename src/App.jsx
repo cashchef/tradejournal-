@@ -1,15 +1,14 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 
-// ── Constants ──────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════
+   CONSTANTS
+═══════════════════════════════════════════════════════════════ */
 const PAIRS      = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","BTC/USD","ETH/USD","XAU/USD","GBP/JPY","USD/CAD","NZD/USD"];
 const SESSIONS   = ["London","New York","Asian","London/NY Overlap"];
 const STRATEGIES = ["Breakout","Trend Follow","Mean Reversion","Scalp","Swing","ICT/SMC","Other"];
-const TABS       = [
-  { id:"journal",    icon:"📋", label:"Journal"    },
-  { id:"analytics",  icon:"📊", label:"Analytics"  },
-  { id:"calculator", icon:"⚖️", label:"Calculator" },
-  { id:"calendar",   icon:"📅", label:"Calendar"   },
-];
+const SETUPS     = ["FVG","Order Block","BOS/CHoCH","Liquidity Sweep","VWAP Reclaim","Supply/Demand","EMA Cross","None"];
+const MOODS      = ["😤 Revenge","😟 Fearful","😐 Neutral","🙂 Focused","🔥 In the Zone"];
+const TABS       = ["journal","analytics","calculator","calendar"];
 
 const TV_SYMBOLS = {
   "EUR/USD":"FX:EURUSD","GBP/USD":"FX:GBPUSD","USD/JPY":"FX:USDJPY",
@@ -20,128 +19,300 @@ const TV_SYMBOLS = {
 const TICKER_PAIRS = ["EUR/USD","GBP/USD","USD/JPY","AUD/USD","GBP/JPY","XAU/USD","BTC/USD","ETH/USD"];
 const tvURL = (pair) => `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(TV_SYMBOLS[pair]||"FX:EURUSD")}`;
 
-const empty = {
+const emptyForm = {
   pair:"EUR/USD", direction:"Long", entry:"", exit:"",
   lots:"0.01", session:"London", strategy:"Trend Follow",
-  notes:"", date: new Date().toISOString().slice(0,10), status:"Closed"
+  setup:"None", mood:"😐 Neutral", notes:"", replay:"",
+  date: new Date().toISOString().slice(0,10), status:"Closed",
+  screenshot: null,
 };
 
-// ── Helpers ────────────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════════════════════════ */
 function calcPnl(t) {
-  const e=parseFloat(t.entry), x=parseFloat(t.exit), l=parseFloat(t.lots);
-  if (!e||!x||!l) return null;
-  const crypto=t.pair.includes("BTC")||t.pair.includes("ETH");
-  const jpy=t.pair.includes("JPY");
-  const pip=jpy?0.01:crypto?1:0.0001;
-  const pips=((x-e)/pip)*(t.direction==="Long"?1:-1);
-  const val=crypto?l:l*100000*pip;
+  const e = parseFloat(t.entry), x = parseFloat(t.exit), l = parseFloat(t.lots);
+  if (!e || !x || !l) return null;
+  const crypto = t.pair.includes("BTC")||t.pair.includes("ETH");
+  const jpy    = t.pair.includes("JPY");
+  const pip    = jpy ? 0.01 : crypto ? 1 : 0.0001;
+  const pips   = ((x-e)/pip)*(t.direction==="Long"?1:-1);
+  const val    = crypto ? l : l*100000*pip;
   return { pnl:+(pips*val).toFixed(2), pips:+pips.toFixed(1) };
 }
 
-function pipValue(pair,lots) {
-  const l=parseFloat(lots)||0;
+function pipValue(pair, lots) {
+  const l = parseFloat(lots)||0;
   if (!l) return 0;
-  const jpy=pair.includes("JPY"), crypto=pair.includes("BTC")||pair.includes("ETH");
+  const jpy    = pair.includes("JPY");
+  const crypto = pair.includes("BTC")||pair.includes("ETH");
   if (crypto) return l;
-  return jpy?l*100000*0.01:l*100000*0.0001;
+  return jpy ? l*100000*0.01 : l*100000*0.0001;
 }
 
 function exportCSV(trades) {
-  const hdr=["Date","Pair","Direction","Entry","Exit","Lots","Session","Strategy","P&L","Pips","Status","Notes"];
-  const rows=trades.map(t=>{ const r=calcPnl(t); return [t.date,t.pair,t.direction,t.entry,t.exit,t.lots,t.session,t.strategy,r?r.pnl:"",r?r.pips:"",t.status,`"${t.notes}"`]; });
-  const csv=[hdr,...rows].map(r=>r.join(",")).join("\n");
-  const a=document.createElement("a"); a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv); a.download="tradelog.csv"; a.click();
+  const hdr = ["Date","Pair","Direction","Entry","Exit","Lots","Session","Strategy","Setup","Mood","P&L","Pips","Status","Notes","Replay"];
+  const rows = trades.map(t => {
+    const r = calcPnl(t);
+    return [t.date,t.pair,t.direction,t.entry,t.exit,t.lots,t.session,t.strategy,t.setup||"",t.mood||"",r?r.pnl:"",r?r.pips:"",t.status,`"${t.notes}"`,`"${t.replay||""}"`];
+  });
+  const csv = [hdr,...rows].map(r=>r.join(",")).join("\n");
+  const a   = document.createElement("a");
+  a.href    = "data:text/csv;charset=utf-8,"+encodeURIComponent(csv);
+  a.download= "tradelog.csv";
+  a.click();
 }
 
-// ── Global styles injected once ────────────────────────────────
-const GLOBAL_CSS = `
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  html { scroll-behavior: smooth; }
-  body { -webkit-tap-highlight-color: transparent; }
-  body { overscroll-behavior: none; }
-  ::-webkit-scrollbar { width: 4px; height: 4px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: #333; border-radius: 4px; }
-  input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
-  select option { background: #1a1a1a; color: #e5e5e5; }
+function getDaysInMonth(year, month) {
+  return new Date(year, month+1, 0).getDate();
+}
 
-  @keyframes mq { from{transform:translateX(0)} to{transform:translateX(-50%)} }
-  .tkr { display:flex; animation:mq 55s linear infinite; white-space:nowrap; align-items:center; }
-  .tkr:hover { animation-play-state:paused; }
-
-  @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
-  .fade-in { animation: fadeIn 0.2s ease; }
-
-  @keyframes slideUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
-  .slide-up { animation: slideUp 0.25s ease; }
-
-  .press:active { transform: scale(0.97); }
-  .hover-card:hover { filter: brightness(1.05); }
-`;
-
-// ── Theme ──────────────────────────────────────────────────────
-const mkTh = (dark) => ({
-  bg:       dark?"#080808":"#f0f4f8",
-  surface:  dark?"#111":"#fff",
-  surface2: dark?"#161616":"#f8fafc",
-  border:   dark?"#1e1e1e":"#e2e8f0",
-  border2:  dark?"#2a2a2a":"#cbd5e1",
-  text:     dark?"#f0f0f0":"#0f172a",
-  text2:    dark?"#aaa":"#475569",
-  muted:    dark?"#555":"#94a3b8",
-  inputBg:  dark?"#0d0d0d":"#f1f5f9",
-  overlay:  dark?"rgba(0,0,0,0.92)":"rgba(15,23,42,0.6)",
-  accent:   "#f59e0b",
-  green:    "#22c55e",
-  red:      "#ef4444",
-});
-
-// ── Small reusable components ──────────────────────────────────
-const Badge = ({ children, color="gray" }) => {
-  const map = {
-    green:  { bg:"#0d2b1a", text:"#22c55e", border:"#166534" },
-    red:    { bg:"#2b0d0d", text:"#ef4444", border:"#991b1b" },
-    amber:  { bg:"#2b1a00", text:"#f59e0b", border:"#92400e" },
-    blue:   { bg:"#0d1a2b", text:"#60a5fa", border:"#1e40af" },
-    gray:   { bg:"#1a1a1a", text:"#9ca3af", border:"#374151" },
-    purple: { bg:"#1a0d2b", text:"#a78bfa", border:"#5b21b6" },
-  };
-  const c = map[color]||map.gray;
-  return (
-    <span style={{ background:c.bg, color:c.text, border:`1px solid ${c.border}`, borderRadius:5, padding:"2px 8px", fontSize:11, fontWeight:700, display:"inline-block", letterSpacing:"0.03em" }}>
-      {children}
-    </span>
-  );
+/* ═══════════════════════════════════════════════════════════════
+   THEME
+═══════════════════════════════════════════════════════════════ */
+const T = {
+  bg:       "#04080f",
+  surface:  "#080e1a",
+  card:     "#0c1422",
+  border:   "#0e1f35",
+  border2:  "#1a3050",
+  text:     "#c8d8e8",
+  muted:    "#3a5570",
+  dim:      "#1e3248",
+  cyan:     "#00d4ff",
+  cyanDim:  "#003d4d",
+  green:    "#00ff88",
+  greenDim: "#002d1a",
+  red:      "#ff3355",
+  redDim:   "#2d0010",
+  amber:    "#ffb800",
+  amberDim: "#2a1e00",
+  white:    "#e8f4ff",
 };
 
-const StatCard = ({ label, value, sub, color, th }) => (
-  <div className="fade-in hover-card" style={{ background:th.surface, border:`1px solid ${th.border}`, borderRadius:14, padding:"16px 14px", textAlign:"center", transition:"filter 0.15s" }}>
-    <div style={{ fontSize:22, fontWeight:800, fontFamily:"'SF Mono',monospace", color: color||th.text, lineHeight:1.1 }}>{value}</div>
-    {sub && <div style={{ fontSize:11, color:th.muted, marginTop:3 }}>{sub}</div>}
-    <div style={{ fontSize:10, color:th.muted, textTransform:"uppercase", letterSpacing:"0.08em", marginTop:5, fontWeight:600 }}>{label}</div>
-  </div>
+const FONTS = `
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap');
+`;
+
+/* ═══════════════════════════════════════════════════════════════
+   GLOBAL STYLES
+═══════════════════════════════════════════════════════════════ */
+const GlobalStyle = () => (
+  <style>{`
+    ${FONTS}
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: ${T.bg}; color: ${T.text}; font-family: 'Rajdhani', sans-serif; }
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: ${T.bg}; }
+    ::-webkit-scrollbar-thumb { background: ${T.border2}; border-radius: 2px; }
+    ::-webkit-scrollbar-thumb:hover { background: ${T.cyan}; }
+
+    @keyframes scanline {
+      0% { transform: translateY(-100%); }
+      100% { transform: translateY(100vh); }
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+    @keyframes slideIn { from{opacity:0;transform:translateX(-12px)} to{opacity:1;transform:translateX(0)} }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    @keyframes marquee { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+    @keyframes glow { 0%,100%{box-shadow:0 0 8px ${T.cyan}22} 50%{box-shadow:0 0 20px ${T.cyan}44} }
+
+    .fade-in { animation: fadeIn 0.25s ease forwards; }
+    .slide-in { animation: slideIn 0.2s ease forwards; }
+
+    .tab-btn {
+      background: none; border: none; cursor: pointer;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px; letter-spacing: 0.12em;
+      text-transform: uppercase; padding: 10px 18px;
+      color: ${T.muted}; border-bottom: 2px solid transparent;
+      transition: all 0.2s; position: relative;
+    }
+    .tab-btn:hover { color: ${T.cyan}; }
+    .tab-btn.active {
+      color: ${T.cyan}; border-bottom-color: ${T.cyan};
+      text-shadow: 0 0 12px ${T.cyan}88;
+    }
+    .tab-btn.active::after {
+      content: ''; position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%);
+      width: 4px; height: 4px; background: ${T.cyan}; border-radius: 50%;
+      box-shadow: 0 0 8px ${T.cyan};
+    }
+
+    .trade-row {
+      border-bottom: 1px solid ${T.border};
+      transition: background 0.15s;
+      animation: fadeIn 0.2s ease forwards;
+    }
+    .trade-row:hover { background: ${T.dim}22; }
+
+    .btn-primary {
+      background: ${T.cyan}; color: ${T.bg}; border: none;
+      font-family: 'Share Tech Mono', monospace; font-size: 12px;
+      font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 10px 20px; border-radius: 4px; cursor: pointer;
+      transition: all 0.2s; box-shadow: 0 0 16px ${T.cyan}44;
+    }
+    .btn-primary:hover { box-shadow: 0 0 24px ${T.cyan}88; transform: translateY(-1px); }
+
+    .btn-ghost {
+      background: none; border: 1px solid ${T.border2}; color: ${T.muted};
+      font-family: 'Share Tech Mono', monospace; font-size: 11px;
+      padding: 7px 14px; border-radius: 4px; cursor: pointer;
+      transition: all 0.2s; letter-spacing: 0.06em;
+    }
+    .btn-ghost:hover { border-color: ${T.cyan}; color: ${T.cyan}; }
+
+    .btn-danger {
+      background: none; border: 1px solid ${T.redDim}; color: ${T.red}44;
+      font-family: 'Share Tech Mono', monospace; font-size: 10px;
+      padding: 4px 10px; border-radius: 3px; cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-danger:hover { border-color: ${T.red}; color: ${T.red}; background: ${T.redDim}; }
+
+    .stat-card {
+      background: ${T.card}; border: 1px solid ${T.border};
+      border-radius: 6px; padding: 16px;
+      transition: border-color 0.2s;
+      position: relative; overflow: hidden;
+    }
+    .stat-card::before {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 1px;
+      background: linear-gradient(90deg, transparent, ${T.cyan}44, transparent);
+    }
+    .stat-card:hover { border-color: ${T.border2}; }
+
+    .form-input {
+      background: ${T.bg}; border: 1px solid ${T.border};
+      border-radius: 4px; color: ${T.text}; padding: 9px 12px;
+      font-size: 13px; width: 100%; outline: none;
+      font-family: 'Share Tech Mono', monospace;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .form-input:focus {
+      border-color: ${T.cyan}; box-shadow: 0 0 0 2px ${T.cyan}18;
+    }
+    .form-input::placeholder { color: ${T.muted}; }
+
+    .form-label {
+      font-size: 10px; color: ${T.muted}; text-transform: uppercase;
+      letter-spacing: 0.1em; display: block; margin-bottom: 5px; margin-top: 14px;
+      font-family: 'Share Tech Mono', monospace;
+    }
+
+    .ticker-wrap { display: flex; animation: marquee 55s linear infinite; white-space: nowrap; }
+    .ticker-wrap:hover { animation-play-state: paused; }
+
+    .dir-btn {
+      flex: 1; padding: 9px; border-radius: 4px; cursor: pointer;
+      font-family: 'Share Tech Mono', monospace; font-size: 12px;
+      font-weight: 700; letter-spacing: 0.08em; border: 1px solid;
+      transition: all 0.15s;
+    }
+
+    .overlay-bg {
+      position: fixed; inset: 0; background: rgba(4,8,15,0.94);
+      backdrop-filter: blur(4px); z-index: 100;
+      display: flex; align-items: flex-start; justify-content: center;
+      padding: 24px 16px; overflow-y: auto;
+    }
+
+    .grid-bg {
+      background-image:
+        linear-gradient(${T.border}33 1px, transparent 1px),
+        linear-gradient(90deg, ${T.border}33 1px, transparent 1px);
+      background-size: 40px 40px;
+    }
+
+    .pnl-positive { color: ${T.green}; }
+    .pnl-negative { color: ${T.red}; }
+    .pnl-zero     { color: ${T.muted}; }
+
+    select option { background: #0c1422; }
+  `}</style>
 );
 
-// ── Chart Modal ────────────────────────────────────────────────
-function ChartModal({ pair, onClose, dark }) {
-  const sym = TV_SYMBOLS[pair]||"FX:EURUSD";
-  const src = `https://s.tradingview.com/widgetembed/?frameElementId=tv&symbol=${encodeURIComponent(sym)}&interval=H1&theme=${dark?"dark":"light"}&style=1&timezone=Etc%2FUTC&hideideas=1`;
+/* ═══════════════════════════════════════════════════════════════
+   TICKER
+═══════════════════════════════════════════════════════════════ */
+function Ticker() {
+  const [prices, setPrices] = useState({});
+  const [prev, setPrev]     = useState({});
+  const [err, setErr]       = useState(false);
+
+  const load = async () => {
+    setErr(false);
+    const next = {};
+    try {
+      const r = await fetch("https://open.er-api.com/v6/latest/USD");
+      if (r.ok) {
+        const d = await r.json(), rt = d.rates||{};
+        if (rt.EUR) next["EUR/USD"] = +(1/rt.EUR).toFixed(5);
+        if (rt.GBP) next["GBP/USD"] = +(1/rt.GBP).toFixed(5);
+        if (rt.JPY) next["USD/JPY"] = +rt.JPY.toFixed(3);
+        if (rt.AUD) next["AUD/USD"] = +(1/rt.AUD).toFixed(5);
+        if (rt.GBP&&rt.JPY) next["GBP/JPY"] = +((1/rt.GBP)*rt.JPY).toFixed(3);
+      }
+    } catch(e){}
+    try {
+      const r2 = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,gold&vs_currencies=usd");
+      if (r2.ok) {
+        const d = await r2.json();
+        if (d.bitcoin)  next["BTC/USD"] = d.bitcoin.usd;
+        if (d.ethereum) next["ETH/USD"] = d.ethereum.usd;
+        if (d.gold)     next["XAU/USD"] = d.gold.usd;
+      }
+    } catch(e){}
+    if (!Object.keys(next).length) { setErr(true); return; }
+    setPrev(prices); setPrices(next);
+  };
+
+  useEffect(() => { load(); const iv = setInterval(load, 60000); return ()=>clearInterval(iv); }, []);
+
+  const items = [...TICKER_PAIRS, ...TICKER_PAIRS];
   return (
-    <div style={{ position:"fixed",inset:0,background:"rgba(0,0,0,0.97)",zIndex:300,display:"flex",flexDirection:"column" }}>
-      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",borderBottom:"1px solid #1f1f1f",background:dark?"#0a0a0a":"#fff",gap:10 }}>
-        <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-          <span style={{ fontSize:18 }}>📊</span>
-          <span style={{ fontWeight:800,fontFamily:"monospace",color:"#f59e0b",fontSize:16 }}>{pair}</span>
-          <Badge color="amber">H1</Badge>
-        </div>
+    <div style={{ background: T.surface, borderBottom: `1px solid ${T.border}`, height: 34, overflow: "hidden", display: "flex", alignItems: "center", position: "relative" }}>
+      {err
+        ? <span style={{ fontSize: 11, color: T.amber, padding: "0 14px", fontFamily: "'Share Tech Mono', monospace" }}>⚠ FEED UNAVAILABLE</span>
+        : <div className="ticker-wrap">
+            {items.map((lbl, i) => {
+              const price = prices[lbl], p0 = prev[lbl];
+              const up = p0&&price>p0, dn = p0&&price<p0;
+              const col = up ? T.green : dn ? T.red : T.muted;
+              return (
+                <span key={i} style={{ padding: "0 20px", fontSize: 11, fontFamily: "'Share Tech Mono', monospace", color: col, borderRight: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ color: T.dim, fontSize: 10 }}>{lbl}</span>
+                  {price
+                    ? <><span style={{ fontSize: 9 }}>{up?"▲":dn?"▼":""}</span>{price.toLocaleString()}</>
+                    : <span style={{ color: T.border2, animation: "pulse 1.5s infinite" }}>···</span>
+                  }
+                </span>
+              );
+            })}
+          </div>
+      }
+      <button onClick={load} style={{ position: "absolute", right: 8, background: "none", border: "none", cursor: "pointer", color: T.muted, fontSize: 13, padding: 4, transition: "color 0.2s" }} onMouseEnter={e=>e.target.style.color=T.cyan} onMouseLeave={e=>e.target.style.color=T.muted}>⟳</button>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CHART MODAL
+═══════════════════════════════════════════════════════════════ */
+function ChartModal({ pair, onClose }) {
+  const sym = TV_SYMBOLS[pair]||"FX:EURUSD";
+  const src = `https://s.tradingview.com/widgetembed/?frameElementId=tv&symbol=${encodeURIComponent(sym)}&interval=H1&theme=dark&style=1&timezone=Etc%2FUTC&hideideas=1`;
+  return (
+    <div style={{ position:"fixed",inset:0,background:"rgba(4,8,15,0.97)",zIndex:200,display:"flex",flexDirection:"column" }}>
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 18px",borderBottom:`1px solid ${T.border}`,background:T.surface }}>
+        <span style={{ fontWeight:700,fontFamily:"'Share Tech Mono',monospace",color:T.cyan,fontSize:14,letterSpacing:"0.1em" }}>
+          <span style={{ color:T.muted,marginRight:8 }}>CHART //</span>{pair}
+        </span>
         <div style={{ display:"flex",gap:8 }}>
-          <a href={tvURL(pair)} target="_blank" rel="noopener noreferrer"
-            style={{ background:"#166534",color:"#22c55e",borderRadius:8,padding:"7px 14px",fontSize:12,fontWeight:700,textDecoration:"none",display:"flex",alignItems:"center",gap:4 }}>
-            🌐 TradingView
-          </a>
-          <button onClick={onClose} style={{ background:"#1a1a1a",border:"1px solid #333",color:"#aaa",borderRadius:8,padding:"7px 14px",cursor:"pointer",fontSize:13,fontWeight:600 }}>
-            ✕ Close
-          </button>
+          <a href={tvURL(pair)} target="_blank" rel="noopener noreferrer" className="btn-ghost" style={{ textDecoration:"none",fontSize:11 }}>↗ TRADINGVIEW</a>
+          <button onClick={onClose} className="btn-ghost">✕ CLOSE</button>
         </div>
       </div>
       <iframe src={src} style={{ flex:1,border:"none",width:"100%",height:"100%" }} allowFullScreen title="Chart" />
@@ -149,577 +320,764 @@ function ChartModal({ pair, onClose, dark }) {
   );
 }
 
-// ── Ticker ─────────────────────────────────────────────────────
-function Ticker({ dark, th }) {
-  const [prices,setPrices] = useState({});
-  const [prev,setPrev]     = useState({});
-  const [err,setErr]       = useState(false);
+/* ═══════════════════════════════════════════════════════════════
+   EQUITY CURVE
+═══════════════════════════════════════════════════════════════ */
+function EquityCurve({ trades }) {
+  const points = useMemo(() => {
+    const sorted = [...trades].filter(t=>t.status==="Closed"&&calcPnl(t)).sort((a,b)=>new Date(a.date)-new Date(b.date));
+    let cum = 0;
+    return sorted.map(t=>{ cum+=calcPnl(t).pnl; return { date:t.date, val:+cum.toFixed(2) }; });
+  }, [trades]);
 
-  const load = async () => {
-    setErr(false); const next={};
-    try {
-      const r1=await fetch("https://open.er-api.com/v6/latest/USD");
-      if (r1.ok) {
-        const d=await r1.json(), r=d.rates||{};
-        if (r.EUR) next["EUR/USD"]=+(1/r.EUR).toFixed(5);
-        if (r.GBP) next["GBP/USD"]=+(1/r.GBP).toFixed(5);
-        if (r.JPY) next["USD/JPY"]=+r.JPY.toFixed(3);
-        if (r.AUD) next["AUD/USD"]=+(1/r.AUD).toFixed(5);
-        if (r.GBP&&r.JPY) next["GBP/JPY"]=+((1/r.GBP)*r.JPY).toFixed(3);
-      }
-    } catch(e){}
-    try {
-      const r2=await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,gold&vs_currencies=usd");
-      if (r2.ok) {
-        const d=await r2.json();
-        if (d.bitcoin)  next["BTC/USD"]=d.bitcoin.usd;
-        if (d.ethereum) next["ETH/USD"]=d.ethereum.usd;
-        if (d.gold)     next["XAU/USD"]=d.gold.usd;
-      }
-    } catch(e){}
-    if (!Object.keys(next).length) { setErr(true); return; }
-    setPrev(prices); setPrices(next);
-  };
-
-  useEffect(()=>{ load(); const iv=setInterval(load,60000); return ()=>clearInterval(iv); },[]);
-
-  const items=[...TICKER_PAIRS,...TICKER_PAIRS];
-  return (
-    <div style={{ background:th.surface2, borderBottom:`1px solid ${th.border}`, height:48, overflow:"hidden", display:"flex", alignItems:"center", position:"relative" }}>
-      {err
-        ? <span style={{ fontSize:11,color:"#f59e0b",padding:"0 16px",opacity:0.8 }}>⚠ Price feed unavailable — tap ⟳ to retry</span>
-        : <div className="tkr">{items.map((label,i)=>{
-            const price=prices[label],p0=prev[label];
-            const up=p0&&price>p0, dn=p0&&price<p0;
-            const isJPY=label.includes("JPY"), isBig=label.includes("BTC")||label.includes("ETH")||label.includes("XAU");
-            const dp=isBig?2:isJPY?3:5;
-            const diff=(p0&&price)?+(price-p0).toFixed(dp):null;
-            const pct=(p0&&price)?+((price-p0)/p0*100).toFixed(2):null;
-            const priceCol=up?"#22c55e":dn?"#ef4444":th.text2;
-            return (
-              <span key={i} style={{ padding:"0 16px", display:"inline-flex", alignItems:"center", gap:7, borderRight:`1px solid ${th.border}`, height:48 }}>
-                <span style={{ fontSize:10, color:th.muted, fontFamily:"monospace", fontWeight:600, letterSpacing:"0.04em" }}>{label}</span>
-                {price
-                  ? <span style={{ fontSize:12, fontFamily:"monospace", fontWeight:700, color:priceCol }}>{price.toLocaleString()}</span>
-                  : <span style={{ fontSize:12, color:th.muted }}>···</span>
-                }
-                {diff!==null&&diff!==0&&(
-                  <span style={{ fontSize:10, fontFamily:"monospace", fontWeight:700, background:up?"#0d2b1a":"#2b0d0d", color:up?"#22c55e":"#ef4444", border:`1px solid ${up?"#166534":"#991b1b"}`, borderRadius:5, padding:"2px 7px", display:"inline-flex", alignItems:"center", gap:2 }}>
-                    {up?"▲":"▼"} {diff>0?"+":""}{diff} <span style={{opacity:0.65}}>({pct>0?"+":""}{pct}%)</span>
-                  </span>
-                )}
-              </span>
-            );
-          })}
-        </div>
-      }
-      <button onClick={load} title="Refresh prices" style={{ position:"absolute",right:8,background:th.surface,border:`1px solid ${th.border}`,borderRadius:6,cursor:"pointer",fontSize:13,color:th.muted,padding:"4px 8px",transition:"all 0.15s" }}>⟳</button>
+  if (points.length < 2) return (
+    <div style={{ textAlign:"center",padding:"28px 0",color:T.muted,fontSize:12,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.08em" }}>
+      — NEED 2+ CLOSED TRADES —
     </div>
   );
-}
 
-// ── Equity Curve ───────────────────────────────────────────────
-function EquityCurve({ trades, th, dark }) {
-  const points = useMemo(()=>{
-    const sorted=[...trades].filter(t=>t.status==="Closed"&&calcPnl(t)).sort((a,b)=>new Date(a.date)-new Date(b.date));
-    let cum=0; return sorted.map(t=>{ cum+=calcPnl(t).pnl; return { date:t.date, val:+cum.toFixed(2) }; });
-  },[trades]);
-
-  if (points.length<2) return <div style={{ textAlign:"center",padding:"24px 0",color:th.muted,fontSize:13 }}>Need at least 2 closed trades to show equity curve</div>;
-
-  const vals=points.map(p=>p.val), min=Math.min(...vals,0), max=Math.max(...vals,0), range=max-min||1;
-  const W=320, H=110, pad=12;
-  const sx=i=>pad+(i/(points.length-1))*(W-2*pad);
-  const sy=v=>H-pad-((v-min)/range)*(H-2*pad);
-  const polyline=points.map((p,i)=>`${sx(i)},${sy(p.val)}`).join(" ");
-  const last=points[points.length-1].val, col=last>=0?"#22c55e":"#ef4444";
+  const vals = points.map(p=>p.val);
+  const min  = Math.min(...vals, 0);
+  const max  = Math.max(...vals, 0);
+  const range= max-min||1;
+  const W=400, H=100, pad=12;
+  const sx = i => pad + (i/(points.length-1))*(W-2*pad);
+  const sy = v => H-pad - ((v-min)/range)*(H-2*pad);
+  const polyline = points.map((p,i)=>`${sx(i)},${sy(p.val)}`).join(" ");
+  const last = points[points.length-1].val;
+  const col  = last>=0 ? T.green : T.red;
 
   return (
-    <div style={{ background:th.surface,border:`1px solid ${th.border}`,borderRadius:14,padding:16,marginBottom:12 }}>
+    <div>
       <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10 }}>
-        <span style={{ fontWeight:700,fontSize:13,color:th.text }}>📈 Equity Curve</span>
-        <span style={{ fontFamily:"monospace",fontWeight:800,color:col,fontSize:15 }}>{last>=0?"+":""}{last}</span>
+        <span style={{ fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:T.muted,letterSpacing:"0.1em" }}>EQUITY CURVE</span>
+        <span style={{ fontFamily:"'Share Tech Mono',monospace",fontWeight:700,color:col,fontSize:15 }}>{last>=0?"+":""}{last}</span>
       </div>
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width:"100%",height:H }}>
         <defs>
-          <linearGradient id="eq" x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id="eqGrad" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={col} stopOpacity="0.25"/>
             <stop offset="100%" stopColor={col} stopOpacity="0"/>
           </linearGradient>
         </defs>
-        <line x1={pad} y1={sy(0)} x2={W-pad} y2={sy(0)} stroke={dark?"#2a2a2a":"#e2e8f0"} strokeWidth="1" strokeDasharray="4"/>
-        <polygon points={`${sx(0)},${sy(0)} ${polyline} ${sx(points.length-1)},${sy(0)}`} fill="url(#eq)"/>
-        <polyline points={polyline} fill="none" stroke={col} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round"/>
-        <circle cx={sx(points.length-1)} cy={sy(last)} r="5" fill={col} stroke={dark?"#111":"#fff"} strokeWidth="2"/>
+        <line x1={pad} y1={sy(0)} x2={W-pad} y2={sy(0)} stroke={T.border2} strokeWidth="1" strokeDasharray="3,4"/>
+        <polygon points={`${sx(0)},${sy(0)} ${polyline} ${sx(points.length-1)},${sy(0)}`} fill="url(#eqGrad)"/>
+        <polyline points={polyline} fill="none" stroke={col} strokeWidth="1.5" strokeLinejoin="round"/>
+        <circle cx={sx(points.length-1)} cy={sy(last)} r="3" fill={col} style={{ filter:`drop-shadow(0 0 4px ${col})` }}/>
       </svg>
-      <div style={{ display:"flex",justifyContent:"space-between",fontSize:10,color:th.muted,marginTop:6,fontFamily:"monospace" }}>
+      <div style={{ display:"flex",justifyContent:"space-between",fontSize:10,color:T.dim,marginTop:4,fontFamily:"'Share Tech Mono',monospace" }}>
         <span>{points[0].date}</span><span>{points[points.length-1].date}</span>
       </div>
     </div>
   );
 }
 
-// ── Bar Row ────────────────────────────────────────────────────
-function BarRow({ label, val, max, th, dark, onChart }) {
-  return (
-    <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:10 }}>
-      <span style={{ fontFamily:"monospace",fontSize:11,width:95,color:th.text2,flexShrink:0,fontWeight:600 }}>{label}</span>
-      <div style={{ flex:1,height:8,background:dark?"#1a1a1a":"#e2e8f0",borderRadius:6,overflow:"hidden" }}>
-        <div style={{ height:"100%",width:`${(Math.abs(val)/max)*100}%`,background:val>=0?"#22c55e":"#ef4444",borderRadius:6,transition:"width 0.4s ease" }}/>
-      </div>
-      <span style={{ fontFamily:"monospace",fontSize:12,color:val>=0?"#22c55e":"#ef4444",width:68,textAlign:"right",flexShrink:0,fontWeight:700 }}>{val>=0?"+":""}{val}</span>
-      {onChart&&<button onClick={onChart} style={{ background:"none",border:`1px solid #2a2a2a`,color:"#f59e0b",borderRadius:5,padding:"2px 7px",fontSize:10,cursor:"pointer",flexShrink:0 }}>📊</button>}
-    </div>
-  );
-}
+/* ═══════════════════════════════════════════════════════════════
+   MONTHLY HEATMAP
+═══════════════════════════════════════════════════════════════ */
+function MonthlyHeatmap({ trades }) {
+  const now = new Date();
+  const [year,  setYear]  = useState(now.getFullYear());
+  const [month, setMonth] = useState(now.getMonth());
 
-// ── Risk Calculator ────────────────────────────────────────────
-function Calculator({ dark, th }) {
-  const [balance,setBalance]=useState("10000");
-  const [risk,setRisk]=useState("1");
-  const [pair,setPair]=useState("EUR/USD");
-  const [sl,setSl]=useState("20");
+  const days = getDaysInMonth(year, month);
+  const firstDay = new Date(year, month, 1).getDay();
 
-  const riskAmt=(parseFloat(balance)||0)*((parseFloat(risk)||0)/100);
-  const slPips=parseFloat(sl)||0;
-  const pv=pipValue(pair,1);
-  const sugLots=pv&&slPips?+(riskAmt/(slPips*pv)).toFixed(2):0;
-  const inp2={ background:th.inputBg,border:`1px solid ${th.border2}`,borderRadius:10,color:th.text,padding:"12px 14px",fontSize:14,width:"100%",outline:"none",fontFamily:"monospace" };
-  const lbl2={ fontSize:11,color:th.muted,textTransform:"uppercase",letterSpacing:"0.06em",display:"block",marginBottom:6,marginTop:16,fontWeight:600 };
+  const dailyPnl = useMemo(() => {
+    const map = {};
+    trades.filter(t=>t.status==="Closed"&&calcPnl(t)).forEach(t=>{
+      const [y,m,d] = t.date.split("-");
+      if (parseInt(y)===year && parseInt(m)-1===month) {
+        const k = parseInt(d);
+        map[k] = +((map[k]||0) + calcPnl(t).pnl).toFixed(2);
+      }
+    });
+    return map;
+  }, [trades, year, month]);
 
-  return (
-    <div className="fade-in">
-      <div style={{ background:th.surface,border:`1px solid ${th.border}`,borderRadius:16,padding:20,marginBottom:14 }}>
-        <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-          <span style={{ fontSize:20 }}>⚖️</span>
-          <span style={{ fontWeight:800,fontSize:16,color:th.text }}>Risk Calculator</span>
-        </div>
-        <p style={{ fontSize:12,color:th.muted,marginBottom:16 }}>Calculate safe lot size based on your risk tolerance</p>
+  const monthNames = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+  const maxAbs = Math.max(...Object.values(dailyPnl).map(Math.abs), 1);
 
-        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
-          <div><label style={lbl2}>Balance ($)</label><input style={inp2} type="number" value={balance} onChange={e=>setBalance(e.target.value)} placeholder="10000"/></div>
-          <div><label style={lbl2}>Risk (%)</label><input style={inp2} type="number" value={risk} onChange={e=>setRisk(e.target.value)} placeholder="1"/></div>
-          <div>
-            <label style={lbl2}>Pair</label>
-            <select style={inp2} value={pair} onChange={e=>setPair(e.target.value)}>
-              {PAIRS.map(p=><option key={p}>{p}</option>)}
-            </select>
-          </div>
-          <div><label style={lbl2}>Stop Loss (pips)</label><input style={inp2} type="number" value={sl} onChange={e=>setSl(e.target.value)} placeholder="20"/></div>
-        </div>
-
-        <div style={{ marginTop:20,background:dark?"#0d2b1a":"#f0fdf4",border:"1px solid #166534",borderRadius:14,padding:18,display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,textAlign:"center" }}>
-          {[
-            { label:"Max Risk $",    val:`$${riskAmt.toFixed(2)}`,                              col:"#22c55e" },
-            { label:"Suggested Lots",val:sugLots||"—",                                          col:"#f59e0b" },
-            { label:"Risk in $",     val:pv?(pv*sugLots*slPips).toFixed(2):"—",                col:"#60a5fa" },
-          ].map(({label,val,col})=>(
-            <div key={label}>
-              <div style={{ fontSize:20,fontWeight:800,color:col,fontFamily:"monospace" }}>{val}</div>
-              <div style={{ fontSize:10,color:th.muted,marginTop:4,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.05em" }}>{label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ background:th.surface,border:`1px solid ${th.border}`,borderRadius:16,padding:20 }}>
-        <div style={{ fontWeight:700,fontSize:14,marginBottom:14,color:th.text }}>📐 Pip Value Reference (0.01 lot)</div>
-        {PAIRS.map((p,i)=>(
-          <div key={p} style={{ display:"flex",justifyContent:"space-between",padding:"9px 0",borderBottom:i<PAIRS.length-1?`1px solid ${th.border}`:"none",fontSize:13 }}>
-            <span style={{ fontFamily:"monospace",color:th.text2,fontWeight:600 }}>{p}</span>
-            <span style={{ fontFamily:"monospace",color:th.text,fontWeight:700 }}>${pipValue(p,0.01).toFixed(4)}<span style={{color:th.muted,fontWeight:400}}>/pip</span></span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Calendar ───────────────────────────────────────────────────
-function CalendarTab({ dark, th={} }) {
-  const muted=th.muted||(dark?"#555":"#94a3b8"), border=th.border||(dark?"#1e1e1e":"#e2e8f0");
-  return (
-    <div className="fade-in">
-      <div style={{ background:th.surface,border:`1px solid ${border}`,borderRadius:16,padding:16,marginBottom:14 }}>
-        <div style={{ display:"flex",alignItems:"center",gap:8,marginBottom:4 }}>
-          <span style={{ fontSize:20 }}>📅</span>
-          <span style={{ fontWeight:800,fontSize:16,color:th.text }}>Economic Calendar</span>
-        </div>
-        <p style={{ fontSize:12,color:muted }}>Forex Factory live events. If the embed is blocked by your browser, use the button below.</p>
-      </div>
-      <div style={{ borderRadius:14,overflow:"hidden",border:`1px solid ${border}`,marginBottom:14 }}>
-        <iframe src="https://www.forexfactory.com/calendar#week" style={{ width:"100%",height:"600px",border:"none" }} title="Forex Factory Calendar"/>
-      </div>
-      <a href="https://www.forexfactory.com/calendar" target="_blank" rel="noopener noreferrer"
-        style={{ display:"flex",alignItems:"center",justifyContent:"center",gap:8,background:"#f59e0b",color:"#000",borderRadius:12,padding:"14px",fontWeight:800,fontSize:14,textDecoration:"none" }}>
-        🌐 Open Forex Factory in new tab
-      </a>
-    </div>
-  );
-}
-
-// ── Main App ───────────────────────────────────────────────────
-export default function App() {
-  const [dark,setDark]         = useState(true);
-  const [trades,setTrades]     = useState([]);
-  const [form,setForm]         = useState({...empty});
-  const [showForm,setShowForm] = useState(false);
-  const [editId,setEditId]     = useState(null);
-  const [tab,setTab]           = useState("journal");
-  const [filter,setFilter]     = useState("All");
-  const [chart,setChart]       = useState(null);
-  const [dailyLimit,setDailyLimit] = useState(3);
-  const [showSettings,setShowSettings] = useState(false);
-
-  const th = mkTh(dark);
-
-  // Persist
-  useEffect(()=>{ try { const s=localStorage.getItem("tl_trades"); if(s) setTrades(JSON.parse(s)); } catch(e){} },[]);
-  useEffect(()=>{ localStorage.setItem("tl_trades",JSON.stringify(trades)); },[trades]);
-
-  const inp = { background:th.inputBg,border:`1px solid ${th.border2}`,borderRadius:10,color:th.text,padding:"12px 14px",fontSize:14,width:"100%",outline:"none",fontFamily:"monospace",transition:"border-color 0.15s" };
-  const lbl = { fontSize:11,color:th.muted,textTransform:"uppercase",letterSpacing:"0.06em",display:"block",marginBottom:6,marginTop:14,fontWeight:600 };
-
-  const setF=      (k,v)=>setForm(p=>({...p,[k]:v}));
-  const openNew=   ()=>{ setForm({...empty,date:new Date().toISOString().slice(0,10)}); setEditId(null); setShowForm(true); };
-  const openEdit=  (t)=>{ setForm({...t}); setEditId(t.id); setShowForm(true); };
-  const closeForm= ()=>{ setShowForm(false); setEditId(null); };
-
-  const today=new Date().toISOString().slice(0,10);
-  const todayCount=trades.filter(t=>t.date===today).length;
-  const limitReached=todayCount>=dailyLimit;
-
-  const save=()=>{
-    if (!form.pair||!form.entry) { alert("Pair and Entry Price are required."); return; }
-    if (!editId&&limitReached) { alert(`Daily limit of ${dailyLimit} trades reached. Stay disciplined! 🛑`); return; }
-    const nt={...form,id:editId??Date.now()};
-    setTrades(prev=>editId?prev.map(t=>t.id===editId?nt:t):[...prev,nt]);
-    closeForm();
+  const cellColor = (pnl) => {
+    if (!pnl) return T.card;
+    const intensity = Math.min(Math.abs(pnl)/maxAbs, 1);
+    if (pnl > 0) return `rgba(0,255,136,${0.1 + intensity*0.5})`;
+    return `rgba(255,51,85,${0.1 + intensity*0.5})`;
   };
 
-  const del=(id)=>{ if(confirm("Delete this trade?")) setTrades(p=>p.filter(t=>t.id!==id)); };
-
-  const visible=trades.filter(t=>filter==="All"||t.status===filter);
-  const closed=useMemo(()=>trades.filter(t=>t.status==="Closed"&&calcPnl(t)),[trades]);
-
-  const stats=useMemo(()=>{
-    if (!closed.length) return null;
-    const vals=closed.map(t=>calcPnl(t).pnl);
-    const wins=vals.filter(v=>v>0).length;
-    const total=vals.reduce((a,b)=>a+b,0);
-    let peak=0,maxDD=0,cum=0;
-    [...closed].sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(t=>{ cum+=calcPnl(t).pnl; if(cum>peak)peak=cum; if(peak-cum>maxDD)maxDD=peak-cum; });
-    const bySession={}, byStrat={};
-    closed.forEach(t=>{ const r=calcPnl(t); bySession[t.session]=+((bySession[t.session]||0)+r.pnl).toFixed(2); byStrat[t.strategy]=+((byStrat[t.strategy]||0)+r.pnl).toFixed(2); });
-    const bestSession=Object.entries(bySession).sort((a,b)=>b[1]-a[1])[0];
-    const sorted=[...closed].sort((a,b)=>new Date(b.date)-new Date(a.date));
-    let streak=0,streakType="";
-    for (const t of sorted) { const p=calcPnl(t).pnl; if(streak===0){streakType=p>0?"W":"L";streak=1;}else if((streakType==="W"&&p>0)||(streakType==="L"&&p<0))streak++;else break; }
-    return { count:closed.length, wins, losses:closed.length-wins, wr:((wins/closed.length)*100).toFixed(1), total:total.toFixed(2), avg:(total/closed.length).toFixed(2), best:Math.max(...vals).toFixed(2), worst:Math.min(...vals).toFixed(2), maxDD:maxDD.toFixed(2), bestSession, streak, streakType };
-  },[closed]);
-
-  const byPair=useMemo(()=>{ const m={}; closed.forEach(t=>{const r=calcPnl(t);m[t.pair]=+((m[t.pair]||0)+r.pnl).toFixed(2);}); return Object.entries(m).sort((a,b)=>b[1]-a[1]); },[closed]);
-  const bySession=useMemo(()=>{ const m={}; closed.forEach(t=>{const r=calcPnl(t);m[t.session]=+((m[t.session]||0)+r.pnl).toFixed(2);}); return Object.entries(m).sort((a,b)=>b[1]-a[1]); },[closed]);
-  const byStrategy=useMemo(()=>{ const m={}; closed.forEach(t=>{const r=calcPnl(t);m[t.strategy]=+((m[t.strategy]||0)+r.pnl).toFixed(2);}); return Object.entries(m).sort((a,b)=>b[1]-a[1]); },[closed]);
-  const preview=calcPnl(form);
-
-  const Field=({label,name,type="text",options,placeholder})=>(
+  return (
     <div>
-      <label style={lbl}>{label}</label>
-      {options
-        ?<select style={inp} value={form[name]} onChange={e=>setF(name,e.target.value)}>{options.map(o=><option key={o} value={o}>{o}</option>)}</select>
-        :<input style={inp} type={type} step="any" placeholder={placeholder} value={form[name]} onChange={e=>setF(name,e.target.value)}/>
-      }
+      <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12 }}>
+        <span style={{ fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:T.muted,letterSpacing:"0.1em" }}>MONTHLY P&L HEATMAP</span>
+        <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+          <button onClick={()=>{ if(month===0){setMonth(11);setYear(y=>y-1);}else setMonth(m=>m-1); }} className="btn-ghost" style={{ padding:"3px 9px",fontSize:11 }}>‹</button>
+          <span style={{ fontFamily:"'Share Tech Mono',monospace",fontSize:12,color:T.cyan,minWidth:70,textAlign:"center" }}>{monthNames[month]} {year}</span>
+          <button onClick={()=>{ if(month===11){setMonth(0);setYear(y=>y+1);}else setMonth(m=>m+1); }} className="btn-ghost" style={{ padding:"3px 9px",fontSize:11 }}>›</button>
+        </div>
+      </div>
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:4 }}>
+        {["S","M","T","W","T","F","S"].map((d,i)=>(
+          <div key={i} style={{ textAlign:"center",fontSize:9,color:T.dim,fontFamily:"'Share Tech Mono',monospace",paddingBottom:2 }}>{d}</div>
+        ))}
+        {Array.from({length:firstDay}).map((_,i)=>(<div key={`e${i}`}/>))}
+        {Array.from({length:days}).map((_,i)=>{
+          const day = i+1;
+          const pnl = dailyPnl[day];
+          return (
+            <div key={day} title={pnl?`${day}: ${pnl>=0?"+":""}${pnl}`:day} style={{
+              background: cellColor(pnl),
+              border: `1px solid ${pnl ? (pnl>0 ? T.green+"33" : T.red+"33") : T.border}`,
+              borderRadius: 3, aspectRatio:"1", display:"flex", flexDirection:"column",
+              alignItems:"center", justifyContent:"center", cursor: pnl?"default":"default",
+              transition:"all 0.2s",
+            }}>
+              <span style={{ fontSize:9,color:pnl?T.text:T.muted,fontFamily:"'Share Tech Mono',monospace" }}>{day}</span>
+              {pnl && <span style={{ fontSize:8,color:pnl>0?T.green:T.red,fontFamily:"'Share Tech Mono',monospace" }}>{pnl>0?"+":""}{pnl}</span>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RISK CALCULATOR
+═══════════════════════════════════════════════════════════════ */
+function Calculator() {
+  const [balance, setBalance] = useState("10000");
+  const [risk,    setRisk]    = useState("1");
+  const [pair,    setPair]    = useState("EUR/USD");
+  const [sl,      setSl]      = useState("20");
+
+  const riskAmt = (parseFloat(balance)||0) * ((parseFloat(risk)||0)/100);
+  const slPips  = parseFloat(sl)||0;
+  const pv      = pipValue(pair, 1);
+  const sugLots = pv && slPips ? +(riskAmt/(slPips*pv)).toFixed(2) : 0;
+  const actualRisk = pv*(sugLots*slPips);
+
+  const Row = ({label, value, color}) => (
+    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 0",borderBottom:`1px solid ${T.border}` }}>
+      <span style={{ fontSize:11,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.08em" }}>{label}</span>
+      <span style={{ fontSize:18,fontWeight:700,fontFamily:"'Share Tech Mono',monospace",color:color||T.cyan }}>{value}</span>
     </div>
   );
 
   return (
-    <div style={{ minHeight:"100vh", background:th.bg, color:th.text, fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif", fontSize:14, paddingBottom:80 }}>
-      <style>{GLOBAL_CSS}</style>
+    <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16 }}>
+      <div className="stat-card">
+        <div style={{ fontSize:11,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em",marginBottom:16 }}>⚖ POSITION SIZER</div>
+        <label className="form-label">Account Balance ($)</label>
+        <input className="form-input" type="number" value={balance} onChange={e=>setBalance(e.target.value)} placeholder="10000"/>
+        <label className="form-label">Risk per Trade (%)</label>
+        <input className="form-input" type="number" value={risk} onChange={e=>setRisk(e.target.value)} placeholder="1"/>
+        <label className="form-label">Pair</label>
+        <select className="form-input" value={pair} onChange={e=>setPair(e.target.value)}>
+          {PAIRS.map(p=><option key={p}>{p}</option>)}
+        </select>
+        <label className="form-label">Stop Loss (pips)</label>
+        <input className="form-input" type="number" value={sl} onChange={e=>setSl(e.target.value)} placeholder="20"/>
 
-      {/* ── Header ── */}
-      <div style={{ position:"sticky",top:0,zIndex:50,background:th.bg,borderBottom:`1px solid ${th.border}`,backdropFilter:"blur(12px)" }}>
-        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",gap:10 }}>
-          {/* Logo */}
-          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
-            <div style={{ width:34,height:34,background:"linear-gradient(135deg,#f59e0b,#d97706)",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,boxShadow:"0 2px 8px rgba(245,158,11,0.3)" }}>📈</div>
-            <div>
-              <div style={{ fontWeight:800,fontSize:16,letterSpacing:"-0.02em",color:th.text }}>TradeLog</div>
-              <div style={{ fontSize:10,color:th.muted,fontWeight:600,letterSpacing:"0.06em" }}>FOREX · CRYPTO</div>
-            </div>
-          </div>
-
-          {/* Actions */}
-          <div style={{ display:"flex",gap:6,alignItems:"center" }}>
-            {/* Daily counter */}
-            <div style={{ background:limitReached?"#2b0d0d":dark?"#0d2b1a":"#f0fdf4", border:`1px solid ${limitReached?"#991b1b":"#166534"}`, borderRadius:8, padding:"5px 10px", textAlign:"center" }}>
-              <div style={{ fontSize:13,fontWeight:800,color:limitReached?"#ef4444":"#22c55e",fontFamily:"monospace" }}>{todayCount}/{dailyLimit}</div>
-              <div style={{ fontSize:9,color:th.muted,textTransform:"uppercase",letterSpacing:"0.05em" }}>Today</div>
-            </div>
-            <button onClick={()=>setDark(d=>!d)} className="press" style={{ background:th.surface,border:`1px solid ${th.border2}`,color:th.muted,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:16,transition:"all 0.15s" }}>{dark?"☀️":"🌙"}</button>
-            <button onClick={()=>setShowSettings(s=>!s)} className="press" style={{ background:th.surface,border:`1px solid ${th.border2}`,color:th.muted,borderRadius:10,padding:"8px 10px",cursor:"pointer",fontSize:16 }}>⚙️</button>
-            <a href="https://www.tradingview.com/chart/" target="_blank" rel="noopener noreferrer" className="press"
-              style={{ background:"#166534",color:"#22c55e",borderRadius:10,padding:"8px 12px",fontWeight:700,fontSize:12,textDecoration:"none",display:"flex",alignItems:"center",gap:4 }}>
-              📊 TV
-            </a>
-            <button onClick={openNew} className="press"
-              style={{ background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#000",border:"none",borderRadius:10,padding:"9px 16px",fontWeight:800,cursor:"pointer",fontSize:13,boxShadow:"0 2px 10px rgba(245,158,11,0.3)",transition:"all 0.15s" }}>
-              + Trade
-            </button>
+        <div style={{ marginTop:20,padding:16,background:T.bg,borderRadius:6,border:`1px solid ${T.green}33` }}>
+          <Row label="MAX RISK $" value={`$${riskAmt.toFixed(2)}`} color={T.amber}/>
+          <Row label="SUGGESTED LOTS" value={sugLots} color={T.cyan}/>
+          <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 0" }}>
+            <span style={{ fontSize:11,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.08em" }}>ACTUAL RISK $</span>
+            <span style={{ fontSize:18,fontWeight:700,fontFamily:"'Share Tech Mono',monospace",color:T.green }}>${actualRisk.toFixed(2)}</span>
           </div>
         </div>
-
-        {/* Settings dropdown */}
-        {showSettings && (
-          <div className="fade-in" style={{ padding:"12px 16px",borderTop:`1px solid ${th.border}`,display:"flex",alignItems:"center",gap:12,flexWrap:"wrap" }}>
-            <div style={{ display:"flex",alignItems:"center",gap:8 }}>
-              <span style={{ fontSize:12,color:th.muted,fontWeight:600 }}>Daily trade limit:</span>
-              <input type="number" min="1" max="20" value={dailyLimit} onChange={e=>setDailyLimit(+e.target.value)} style={{ ...inp,width:60,padding:"6px 10px",fontSize:13 }}/>
-            </div>
-            <button onClick={()=>exportCSV(trades)} className="press" style={{ background:th.surface,border:`1px solid ${th.border2}`,color:th.text2,borderRadius:8,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:700 }}>⬇ Export CSV</button>
-            <button onClick={()=>{ if(confirm("Clear ALL trades? This cannot be undone.")) setTrades([]); }} style={{ background:"#2b0d0d",border:"1px solid #991b1b",color:"#ef4444",borderRadius:8,padding:"7px 14px",cursor:"pointer",fontSize:12,fontWeight:700 }}>🗑 Clear All</button>
-          </div>
-        )}
-
-        {/* Ticker */}
-        <Ticker dark={dark} th={th}/>
       </div>
 
-      {/* ── Content ── */}
-      <div style={{ padding:"16px 14px",maxWidth:680,margin:"0 auto" }}>
-
-        {/* ── JOURNAL ── */}
-        {tab==="journal" && (
-          <div className="fade-in">
-            {/* Filter pills */}
-            <div style={{ display:"flex",gap:8,marginBottom:16,alignItems:"center" }}>
-              {["All","Open","Closed"].map(f=>(
-                <button key={f} onClick={()=>setFilter(f)} className="press"
-                  style={{ background:filter===f?"#f59e0b":th.surface, color:filter===f?"#000":th.muted, border:`1px solid ${filter===f?"#f59e0b":th.border}`, borderRadius:20, padding:"6px 16px", fontSize:12, cursor:"pointer", fontWeight:700, transition:"all 0.15s" }}>
-                  {f} {f==="All"?trades.length:trades.filter(t=>t.status===f).length}
-                </button>
-              ))}
+      <div className="stat-card">
+        <div style={{ fontSize:11,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em",marginBottom:16 }}>📐 PIP VALUE REF (0.01 lot)</div>
+        {PAIRS.map(p=>{
+          const pv01 = pipValue(p,0.01);
+          return (
+            <div key={p} style={{ display:"flex",justifyContent:"space-between",padding:"8px 0",borderBottom:`1px solid ${T.border}`,fontSize:12 }}>
+              <span style={{ fontFamily:"'Share Tech Mono',monospace",color:T.muted }}>{p}</span>
+              <span style={{ fontFamily:"'Share Tech Mono',monospace",color:T.cyan }}>${pv01.toFixed(4)}</span>
             </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
-            {visible.length===0 ? (
-              <div style={{ textAlign:"center",padding:"80px 0",color:th.muted }}>
-                <div style={{ fontSize:48,marginBottom:12 }}>📭</div>
-                <div style={{ fontSize:16,fontWeight:700,color:th.text2,marginBottom:6 }}>No trades yet</div>
-                <div style={{ fontSize:13,marginBottom:20 }}>Tap + Trade to log your first trade</div>
-                <button onClick={openNew} style={{ background:"#f59e0b",color:"#000",border:"none",borderRadius:12,padding:"12px 24px",fontWeight:800,cursor:"pointer",fontSize:14 }}>+ Log First Trade</button>
-              </div>
-            ) : (
-              [...visible].reverse().map(t=>{
-                const r=calcPnl(t), win=r&&r.pnl>0;
-                return (
-                  <div key={t.id} className="hover-card slide-up" style={{ background:th.surface,border:`1px solid ${th.border}`,borderRadius:16,padding:16,marginBottom:10,transition:"filter 0.15s" }}>
-                    {/* Top row */}
-                    <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8 }}>
-                      <div style={{ flex:1,minWidth:0 }}>
-                        <div style={{ display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",marginBottom:8 }}>
-                          <span style={{ fontWeight:800,fontSize:16,fontFamily:"monospace",color:th.text }}>{t.pair}</span>
-                          <Badge color={t.direction==="Long"?"green":"red"}>{t.direction}</Badge>
-                          {t.status==="Open" && <Badge color="amber">● Live</Badge>}
-                        </div>
-                        <div style={{ display:"flex",gap:6,flexWrap:"wrap" }}>
-                          <span style={{ fontSize:11,color:th.muted,background:th.surface2,border:`1px solid ${th.border}`,borderRadius:5,padding:"2px 7px",fontWeight:600 }}>📅 {t.date}</span>
-                          <span style={{ fontSize:11,color:th.muted,background:th.surface2,border:`1px solid ${th.border}`,borderRadius:5,padding:"2px 7px",fontWeight:600 }}>🕐 {t.session}</span>
-                          <span style={{ fontSize:11,color:th.muted,background:th.surface2,border:`1px solid ${th.border}`,borderRadius:5,padding:"2px 7px",fontWeight:600 }}>⚡ {t.strategy}</span>
-                        </div>
-                      </div>
-                      {/* P&L */}
-                      <div style={{ textAlign:"right",flexShrink:0 }}>
-                        {r ? (
-                          <div style={{ background:win?"#0d2b1a":"#2b0d0d",border:`1px solid ${win?"#166534":"#991b1b"}`,borderRadius:10,padding:"8px 12px",minWidth:80 }}>
-                            <div style={{ color:win?"#22c55e":"#ef4444",fontWeight:800,fontFamily:"monospace",fontSize:16 }}>{win?"+":""}{r.pnl}</div>
-                            <div style={{ fontSize:10,color:win?"#166534":"#991b1b",fontWeight:600 }}>{win?"+":""}{r.pips} pips</div>
-                          </div>
-                        ) : (
-                          <div style={{ background:"#2b1a00",border:"1px solid #92400e",borderRadius:10,padding:"8px 12px" }}>
-                            <div style={{ color:"#f59e0b",fontWeight:800,fontSize:13 }}>● Open</div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+/* ═══════════════════════════════════════════════════════════════
+   CALENDAR TAB
+═══════════════════════════════════════════════════════════════ */
+function CalendarTab() {
+  const src = `https://sslecal2.investing.com?columns=exc_flags,exc_currency,exc_importance,exc_actual,exc_forecast,exc_previous&features=datepicker,timezone&countries=25,32,6,37,72,22,17,39,14,10,35&calType=week&timeZone=Africa/Nairobi&lang=1&theme=dark&fontSize=13`;
+  return (
+    <div>
+      <div style={{ fontSize:11,color:T.muted,marginBottom:12,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.06em" }}>
+        ◈ LIVE ECONOMIC CALENDAR — HIGH IMPACT EVENTS
+      </div>
+      <div style={{ borderRadius:6,overflow:"hidden",border:`1px solid ${T.border}` }}>
+        <iframe src={src} style={{ width:"100%",height:580,border:"none" }} title="Economic Calendar"/>
+      </div>
+      <div style={{ fontSize:10,color:T.dim,marginTop:6,textAlign:"center",fontFamily:"'Share Tech Mono',monospace" }}>POWERED BY INVESTING.COM</div>
+    </div>
+  );
+}
 
-                    {/* Entry/Exit row */}
-                    <div style={{ marginTop:10,padding:"8px 12px",background:th.surface2,border:`1px solid ${th.border}`,borderRadius:10,fontFamily:"monospace",fontSize:12,color:th.text2 }}>
-                      <span style={{ color:th.muted }}>Entry </span>{t.entry}
-                      {t.exit && <><span style={{ color:th.muted }}> → Exit </span>{t.exit}</>}
-                      <span style={{ color:th.muted }}> · {t.lots} lot</span>
-                    </div>
+/* ═══════════════════════════════════════════════════════════════
+   ANALYTICS TAB
+═══════════════════════════════════════════════════════════════ */
+function Analytics({ trades, setChart }) {
+  const closed = useMemo(()=>trades.filter(t=>t.status==="Closed"&&calcPnl(t)),[trades]);
 
-                    {t.notes && (
-                      <div style={{ marginTop:8,padding:"8px 12px",background:th.surface2,border:`1px solid ${th.border}`,borderRadius:10,fontSize:12,color:th.muted,fontStyle:"italic" }}>
-                        💬 {t.notes}
-                      </div>
-                    )}
+  const stats = useMemo(()=>{
+    if (!closed.length) return null;
+    const vals  = closed.map(t=>calcPnl(t).pnl);
+    const wins  = vals.filter(v=>v>0).length;
+    const total = vals.reduce((a,b)=>a+b,0);
+    let peak=0,maxDD=0,cum=0;
+    [...closed].sort((a,b)=>new Date(a.date)-new Date(b.date)).forEach(t=>{
+      cum+=calcPnl(t).pnl;
+      if(cum>peak) peak=cum;
+      if(peak-cum>maxDD) maxDD=peak-cum;
+    });
+    const sorted=[...closed].sort((a,b)=>new Date(b.date)-new Date(a.date));
+    let streak=0,streakType="";
+    for (const t of sorted) {
+      const p=calcPnl(t).pnl;
+      if(streak===0){streakType=p>0?"W":"L";streak=1;}
+      else if((streakType==="W"&&p>0)||(streakType==="L"&&p<0)) streak++;
+      else break;
+    }
+    const avgWin  = vals.filter(v=>v>0).reduce((a,b)=>a+b,0)/Math.max(wins,1);
+    const avgLoss = vals.filter(v=>v<0).reduce((a,b)=>a+b,0)/Math.max(closed.length-wins,1);
+    const rr = avgLoss!==0 ? Math.abs(avgWin/avgLoss).toFixed(2) : "—";
 
-                    {/* Actions */}
-                    <div style={{ display:"flex",gap:6,marginTop:10,flexWrap:"wrap" }}>
-                      <button onClick={()=>setChart(t.pair)} className="press" style={{ flex:1,background:th.surface2,border:`1px solid ${th.border2}`,color:"#f59e0b",borderRadius:8,padding:"8px",fontSize:12,cursor:"pointer",fontWeight:700 }}>📊 Chart</button>
-                      <a href={tvURL(t.pair)} target="_blank" rel="noopener noreferrer" style={{ flex:1,background:"#0d2b1a",border:"1px solid #166534",color:"#22c55e",borderRadius:8,padding:"8px",fontSize:12,fontWeight:700,textDecoration:"none",textAlign:"center",display:"flex",alignItems:"center",justifyContent:"center",gap:4 }}>🌐 TV</a>
-                      <button onClick={()=>openEdit(t)} className="press" style={{ flex:1,background:th.surface2,border:`1px solid ${th.border2}`,color:th.text2,borderRadius:8,padding:"8px",fontSize:12,cursor:"pointer",fontWeight:700 }}>✏️ Edit</button>
-                      <button onClick={()=>del(t.id)} className="press" style={{ background:"#2b0d0d",border:"1px solid #991b1b",color:"#ef4444",borderRadius:8,padding:"8px 12px",fontSize:12,cursor:"pointer",fontWeight:700 }}>🗑</button>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
+    const byMood = {};
+    closed.forEach(t=>{
+      const r=calcPnl(t); const m=t.mood||"Unknown";
+      if(!byMood[m]) byMood[m]={pnl:0,count:0};
+      byMood[m].pnl+=r.pnl; byMood[m].count++;
+    });
 
-        {/* ── ANALYTICS ── */}
-        {tab==="analytics" && (
-          <div className="fade-in">
-            {!stats ? (
-              <div style={{ textAlign:"center",padding:"80px 0",color:th.muted }}>
-                <div style={{ fontSize:48,marginBottom:12 }}>📊</div>
-                <div style={{ fontSize:16,fontWeight:700,color:th.text2,marginBottom:6 }}>No data yet</div>
-                <div style={{ fontSize:13 }}>Add closed trades to see your analytics</div>
-              </div>
-            ) : (
-              <>
-                {/* Streak */}
-                <div style={{ background:stats.streakType==="W"?"#0d2b1a":"#2b0d0d",border:`1px solid ${stats.streakType==="W"?"#166534":"#991b1b"}`,borderRadius:14,padding:"14px 18px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                  <div>
-                    <div style={{ fontSize:11,color:th.muted,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.06em" }}>Current Streak</div>
-                    <div style={{ fontSize:22,fontWeight:800,color:stats.streakType==="W"?"#22c55e":"#ef4444",fontFamily:"monospace",marginTop:2 }}>
-                      {stats.streakType==="W"?"🔥":"❄️"} {stats.streak} {stats.streakType==="W"?"Win":"Loss"}{stats.streak>1?"s":""}
-                    </div>
-                  </div>
-                  <div style={{ textAlign:"right" }}>
-                    <div style={{ fontSize:11,color:th.muted,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.06em" }}>Win / Loss</div>
-                    <div style={{ fontSize:20,fontWeight:800,fontFamily:"monospace",marginTop:2 }}>
-                      <span style={{color:"#22c55e"}}>{stats.wins}W</span>
-                      <span style={{color:th.muted}}> · </span>
-                      <span style={{color:"#ef4444"}}>{stats.losses}L</span>
-                    </div>
-                  </div>
-                </div>
+    return {
+      count:closed.length, wins, losses:closed.length-wins,
+      wr:((wins/closed.length)*100).toFixed(1),
+      total:total.toFixed(2), avg:(total/closed.length).toFixed(2),
+      best:Math.max(...vals).toFixed(2), worst:Math.min(...vals).toFixed(2),
+      maxDD:maxDD.toFixed(2), rr, streak, streakType, byMood,
+    };
+  },[closed]);
 
-                {/* Stat grid */}
-                <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:14 }}>
-                  <StatCard th={th} label="Win Rate"   value={`${stats.wr}%`}      color={parseFloat(stats.wr)>=50?"#22c55e":"#ef4444"} sub={`${stats.wins}W · ${stats.losses}L`}/>
-                  <StatCard th={th} label="Total P&L"  value={`$${stats.total}`}    color={parseFloat(stats.total)>=0?"#22c55e":"#ef4444"}/>
-                  <StatCard th={th} label="Avg P&L"    value={`$${stats.avg}`}      color={parseFloat(stats.avg)>=0?"#22c55e":"#ef4444"}/>
-                  <StatCard th={th} label="Trades"     value={stats.count}/>
-                  <StatCard th={th} label="Best Trade" value={`$${stats.best}`}     color="#22c55e"/>
-                  <StatCard th={th} label="Worst Trade"value={`$${stats.worst}`}    color="#ef4444"/>
-                  <StatCard th={th} label="Max Drawdown" value={`$${stats.maxDD}`} color="#ef4444"/>
-                  <StatCard th={th} label="Best Session" value={stats.bestSession?stats.bestSession[0]:"—"} color="#f59e0b" sub={stats.bestSession?`+$${stats.bestSession[1]}`:null}/>
-                </div>
+  const byPair = useMemo(()=>{
+    const m={};
+    closed.forEach(t=>{ const r=calcPnl(t); m[t.pair]=+((m[t.pair]||0)+r.pnl).toFixed(2); });
+    return Object.entries(m).sort((a,b)=>b[1]-a[1]);
+  },[closed]);
 
-                <EquityCurve trades={trades} th={th} dark={dark}/>
+  const bySession = useMemo(()=>{
+    const m={};
+    closed.forEach(t=>{ const r=calcPnl(t); m[t.session]=+((m[t.session]||0)+r.pnl).toFixed(2); });
+    return Object.entries(m).sort((a,b)=>b[1]-a[1]);
+  },[closed]);
 
-                {[
-                  { title:"P&L by Pair",     data:byPair,    showChart:true },
-                  { title:"P&L by Session",  data:bySession,  showChart:false },
-                  { title:"P&L by Strategy", data:byStrategy, showChart:false },
-                ].map(({title,data,showChart})=>(
-                  <div key={title} style={{ background:th.surface,border:`1px solid ${th.border}`,borderRadius:14,padding:16,marginBottom:12 }}>
-                    <div style={{ fontSize:11,color:th.muted,textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:14,fontWeight:700 }}>{title}</div>
-                    {data.map(([label,val])=>(
-                      <BarRow key={label} label={label} val={val} max={Math.max(...data.map(e=>Math.abs(e[1])))} th={th} dark={dark} onChart={showChart?()=>setChart(label):null}/>
-                    ))}
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
-        )}
+  const byStrategy = useMemo(()=>{
+    const m={};
+    closed.forEach(t=>{ const r=calcPnl(t); m[t.strategy]=+((m[t.strategy]||0)+r.pnl).toFixed(2); });
+    return Object.entries(m).sort((a,b)=>b[1]-a[1]);
+  },[closed]);
 
-        {tab==="calculator" && <Calculator dark={dark} th={th}/>}
-        {tab==="calendar"   && <CalendarTab dark={dark} th={th}/>}
+  const bySetup = useMemo(()=>{
+    const m={};
+    closed.forEach(t=>{ const r=calcPnl(t); const s=t.setup||"None"; m[s]=+((m[s]||0)+r.pnl).toFixed(2); });
+    return Object.entries(m).sort((a,b)=>b[1]-a[1]);
+  },[closed]);
+
+  if (!stats) return (
+    <div style={{ textAlign:"center",padding:"60px 0",color:T.muted,fontFamily:"'Share Tech Mono',monospace",fontSize:13,letterSpacing:"0.1em" }}>
+      — NO CLOSED TRADES YET —<br/>
+      <span style={{ fontSize:10,color:T.dim,marginTop:8,display:"block" }}>Log and close your first trade to see analytics</span>
+    </div>
+  );
+
+  const StatCard = ({label, value, sub, color}) => (
+    <div className="stat-card">
+      <div style={{ fontSize:9,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.12em",marginBottom:8 }}>{label}</div>
+      <div style={{ fontSize:22,fontWeight:700,fontFamily:"'Share Tech Mono',monospace",color:color||T.cyan }}>{value}</div>
+      {sub && <div style={{ fontSize:10,color:T.dim,marginTop:3,fontFamily:"'Share Tech Mono',monospace" }}>{sub}</div>}
+    </div>
+  );
+
+  const maxBarPair = Math.max(...byPair.map(([,v])=>Math.abs(v)),1);
+  const maxBarSess = Math.max(...bySession.map(([,v])=>Math.abs(v)),1);
+  const maxBarStrat= Math.max(...byStrategy.map(([,v])=>Math.abs(v)),1);
+  const maxBarSetup= Math.max(...bySetup.map(([,v])=>Math.abs(v)),1);
+
+  const BarRow = ({label, val, max, onChart}) => (
+    <div style={{ display:"flex",alignItems:"center",gap:10,marginBottom:9 }}>
+      <span style={{ fontFamily:"'Share Tech Mono',monospace",fontSize:11,width:110,color:T.muted,flexShrink:0 }}>{label}</span>
+      <div style={{ flex:1,height:5,background:T.bg,borderRadius:3 }}>
+        <div style={{ height:"100%",width:`${(Math.abs(val)/max)*100}%`,background:val>=0?T.green:T.red,borderRadius:3,transition:"width 0.5s",boxShadow:val>=0?`0 0 6px ${T.green}66`:`0 0 6px ${T.red}66` }}/>
+      </div>
+      <span style={{ fontFamily:"'Share Tech Mono',monospace",fontSize:11,color:val>=0?T.green:T.red,width:60,textAlign:"right",flexShrink:0 }}>{val>=0?"+":""}{val}</span>
+      {onChart && <button onClick={onChart} className="btn-ghost" style={{ padding:"2px 7px",fontSize:9 }}>↗</button>}
+    </div>
+  );
+
+  return (
+    <div className="fade-in">
+      {/* KPI Row */}
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16 }}>
+        <StatCard label="WIN RATE" value={`${stats.wr}%`} sub={`${stats.wins}W / ${stats.losses}L`} color={parseFloat(stats.wr)>=50?T.green:T.red}/>
+        <StatCard label="NET P&L" value={`${stats.total>=0?"+":""}${stats.total}`} sub={`Avg: ${stats.avg}/trade`} color={stats.total>=0?T.green:T.red}/>
+        <StatCard label="RISK:REWARD" value={stats.rr} sub="Avg R:R ratio" color={T.amber}/>
+        <StatCard label="MAX DRAWDOWN" value={`-${stats.maxDD}`} sub="From peak equity" color={T.red}/>
+      </div>
+      <div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:16 }}>
+        <StatCard label="BEST TRADE" value={`+${stats.best}`} color={T.green}/>
+        <StatCard label="WORST TRADE" value={stats.worst} color={T.red}/>
+        <StatCard label="TOTAL TRADES" value={stats.count}/>
+        <StatCard label="CURRENT STREAK" value={`${stats.streak}${stats.streakType}`} color={stats.streakType==="W"?T.green:T.red}/>
       </div>
 
-      {/* ── Bottom Nav ── */}
-      <div style={{ position:"fixed",bottom:0,left:0,right:0,zIndex:50,background:th.surface,borderTop:`1px solid ${th.border}`,display:"flex",backdropFilter:"blur(12px)" }}>
-        {TABS.map(t=>(
-          <button key={t.id} onClick={()=>setTab(t.id)} className="press"
-            style={{ flex:1,background:"none",border:"none",cursor:"pointer",padding:"10px 4px 12px",display:"flex",flexDirection:"column",alignItems:"center",gap:3,transition:"all 0.15s" }}>
-            <span style={{ fontSize:18,filter:tab===t.id?"none":"grayscale(1) opacity(0.5)" }}>{t.icon}</span>
-            <span style={{ fontSize:10,fontWeight:700,color:tab===t.id?"#f59e0b":th.muted,letterSpacing:"0.04em",textTransform:"uppercase" }}>{t.label}</span>
-            {tab===t.id && <div style={{ width:20,height:2,background:"#f59e0b",borderRadius:2,marginTop:1 }}/>}
-          </button>
-        ))}
+      {/* Equity Curve */}
+      <div className="stat-card" style={{ marginBottom:16 }}>
+        <EquityCurve trades={trades}/>
       </div>
 
-      {/* ── Trade Modal ── */}
-      {showForm && (
-        <div style={{ position:"fixed",inset:0,background:th.overlay,display:"flex",alignItems:"flex-end",justifyContent:"center",zIndex:100 }}
-          onClick={e=>e.target===e.currentTarget&&closeForm()}>
-          <div className="slide-up" style={{ background:th.surface,border:`1px solid ${th.border2}`,borderRadius:"20px 20px 0 0",padding:"20px 18px 32px",width:"100%",maxWidth:540,maxHeight:"92vh",overflowY:"auto" }}>
-            {/* Handle */}
-            <div style={{ width:36,height:4,background:th.border2,borderRadius:2,margin:"0 auto 18px" }}/>
-            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18 }}>
-              <div>
-                <div style={{ fontWeight:800,color:th.text,fontSize:18 }}>{editId?"Edit Trade":"New Trade"}</div>
-                <div style={{ fontSize:12,color:th.muted,marginTop:2 }}>Fill in the details below</div>
+      {/* Monthly Heatmap */}
+      <div className="stat-card" style={{ marginBottom:16 }}>
+        <MonthlyHeatmap trades={trades}/>
+      </div>
+
+      {/* Breakdown grids */}
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16 }}>
+        <div className="stat-card">
+          <div style={{ fontSize:10,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em",marginBottom:14 }}>P&L BY PAIR</div>
+          {byPair.map(([lbl,val])=><BarRow key={lbl} label={lbl} val={val} max={maxBarPair} onChart={()=>setChart(lbl)}/>)}
+        </div>
+        <div className="stat-card">
+          <div style={{ fontSize:10,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em",marginBottom:14 }}>P&L BY SESSION</div>
+          {bySession.map(([lbl,val])=><BarRow key={lbl} label={lbl} val={val} max={maxBarSess}/>)}
+        </div>
+        <div className="stat-card">
+          <div style={{ fontSize:10,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em",marginBottom:14 }}>P&L BY STRATEGY</div>
+          {byStrategy.map(([lbl,val])=><BarRow key={lbl} label={lbl} val={val} max={maxBarStrat}/>)}
+        </div>
+        <div className="stat-card">
+          <div style={{ fontSize:10,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em",marginBottom:14 }}>P&L BY SETUP</div>
+          {bySetup.map(([lbl,val])=><BarRow key={lbl} label={lbl} val={val} max={maxBarSetup}/>)}
+        </div>
+      </div>
+
+      {/* Mood analysis */}
+      {Object.keys(stats.byMood).length > 0 && (
+        <div className="stat-card">
+          <div style={{ fontSize:10,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em",marginBottom:14 }}>🧠 P&L BY MENTAL STATE</div>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:10 }}>
+            {Object.entries(stats.byMood).sort((a,b)=>b[1].pnl-a[1].pnl).map(([mood,d])=>(
+              <div key={mood} style={{ background:T.bg,border:`1px solid ${T.border}`,borderRadius:5,padding:"10px 12px",textAlign:"center" }}>
+                <div style={{ fontSize:13,marginBottom:4 }}>{mood.split(" ")[0]}</div>
+                <div style={{ fontSize:10,color:T.muted,fontFamily:"'Share Tech Mono',monospace",marginBottom:6 }}>{mood.split(" ").slice(1).join(" ")}</div>
+                <div style={{ fontFamily:"'Share Tech Mono',monospace",fontWeight:700,color:d.pnl>=0?T.green:T.red,fontSize:14 }}>{d.pnl>=0?"+":""}{d.pnl.toFixed(2)}</div>
+                <div style={{ fontSize:10,color:T.dim,fontFamily:"'Share Tech Mono',monospace" }}>{d.count} trades</div>
               </div>
-              <button onClick={closeForm} style={{ background:th.surface2,border:`1px solid ${th.border}`,color:th.muted,borderRadius:10,padding:"8px 12px",cursor:"pointer",fontSize:14,fontWeight:700 }}>✕</button>
-            </div>
-
-            {/* Direction toggle */}
-            <label style={lbl}>Direction</label>
-            <div style={{ display:"flex",gap:8,marginBottom:4 }}>
-              {["Long","Short"].map(d=>(
-                <button key={d} onClick={()=>setF("direction",d)} className="press"
-                  style={{ flex:1,padding:"12px",borderRadius:10,border:`1px solid ${form.direction===d?(d==="Long"?"#166534":"#991b1b"):th.border}`,background:form.direction===d?(d==="Long"?"#0d2b1a":"#2b0d0d"):th.surface2,color:form.direction===d?(d==="Long"?"#22c55e":"#ef4444"):th.muted,fontWeight:800,cursor:"pointer",fontSize:14,transition:"all 0.15s" }}>
-                  {d==="Long"?"▲ Long":"▼ Short"}
-                </button>
-              ))}
-            </div>
-
-            {/* Status toggle */}
-            <label style={lbl}>Status</label>
-            <div style={{ display:"flex",gap:8,marginBottom:4 }}>
-              {["Open","Closed"].map(s=>(
-                <button key={s} onClick={()=>setF("status",s)} className="press"
-                  style={{ flex:1,padding:"10px",borderRadius:10,border:`1px solid ${form.status===s?"#f59e0b":th.border}`,background:form.status===s?"#2b1a00":th.surface2,color:form.status===s?"#f59e0b":th.muted,fontWeight:700,cursor:"pointer",fontSize:13,transition:"all 0.15s" }}>
-                  {s==="Open"?"● Open":"✓ Closed"}
-                </button>
-              ))}
-            </div>
-
-            <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:10 }}>
-              <Field label="Date"        name="date"    type="date"/>
-              <Field label="Pair"        name="pair"    options={PAIRS}/>
-              <Field label="Entry Price" name="entry"   type="number" placeholder="e.g. 1.0820"/>
-              <Field label="Exit Price"  name="exit"    type="number" placeholder="e.g. 1.0890"/>
-              <Field label="Lot Size"    name="lots"    type="number" placeholder="e.g. 0.01"/>
-              <Field label="Session"     name="session" options={SESSIONS}/>
-            </div>
-            <Field label="Strategy" name="strategy" options={STRATEGIES}/>
-            <div>
-              <label style={lbl}>Notes</label>
-              <textarea style={{ ...inp,height:72,resize:"vertical" }} placeholder="Trade rationale, what you observed..." value={form.notes} onChange={e=>setF("notes",e.target.value)}/>
-            </div>
-
-            {preview && (
-              <div className="fade-in" style={{ background:preview.pnl>=0?"#0d2b1a":"#2b0d0d",border:`1px solid ${preview.pnl>=0?"#166534":"#991b1b"}`,borderRadius:12,padding:"14px 16px",marginTop:14,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
-                <div>
-                  <div style={{ fontSize:10,color:"#888",textTransform:"uppercase",letterSpacing:"0.06em",fontWeight:600 }}>Estimated P&L</div>
-                  <div style={{ fontFamily:"monospace",fontWeight:800,color:preview.pnl>=0?"#22c55e":"#ef4444",fontSize:20,marginTop:2 }}>{preview.pnl>=0?"+":""}{preview.pnl}</div>
-                </div>
-                <div style={{ textAlign:"right" }}>
-                  <div style={{ fontSize:10,color:"#888",textTransform:"uppercase",letterSpacing:"0.06em",fontWeight:600 }}>Pips</div>
-                  <div style={{ fontFamily:"monospace",fontWeight:800,color:preview.pnl>=0?"#22c55e":"#ef4444",fontSize:18,marginTop:2 }}>{preview.pips>=0?"+":""}{preview.pips}</div>
-                </div>
-              </div>
-            )}
-
-            <div style={{ display:"flex",gap:10,marginTop:20 }}>
-              <button onClick={closeForm} className="press" style={{ flex:1,background:th.surface2,border:`1px solid ${th.border2}`,color:th.muted,borderRadius:12,padding:14,cursor:"pointer",fontFamily:"inherit",fontSize:14,fontWeight:700 }}>Cancel</button>
-              <button onClick={save} className="press" style={{ flex:2,background:"linear-gradient(135deg,#f59e0b,#d97706)",color:"#000",border:"none",borderRadius:12,padding:14,fontWeight:800,cursor:"pointer",fontFamily:"inherit",fontSize:15,boxShadow:"0 4px 14px rgba(245,158,11,0.35)" }}>
-                {editId?"Update Trade":"Add Trade ✓"}
-              </button>
-            </div>
+            ))}
           </div>
         </div>
       )}
+    </div>
+  );
+}
 
-      {chart && <ChartModal pair={chart} dark={dark} onClose={()=>setChart(null)}/>}
+/* ═══════════════════════════════════════════════════════════════
+   TRADE FORM
+═══════════════════════════════════════════════════════════════ */
+function TradeForm({ form, setF, onSave, onClose, isEdit, preview, limitReached, dailyLimit }) {
+  const fileRef = useRef();
+
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => setF("screenshot", ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  return (
+    <div className="overlay-bg" onClick={e=>{ if(e.target===e.currentTarget) onClose(); }}>
+      <div style={{ background:T.surface,border:`1px solid ${T.border2}`,borderRadius:8,width:"100%",maxWidth:640,animation:"fadeIn 0.2s ease" }}>
+        {/* Header */}
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",padding:"16px 20px",borderBottom:`1px solid ${T.border}` }}>
+          <div>
+            <div style={{ fontFamily:"'Share Tech Mono',monospace",fontSize:13,color:T.cyan,letterSpacing:"0.1em" }}>
+              {isEdit ? "◈ EDIT TRADE" : "◈ LOG NEW TRADE"}
+            </div>
+            {!isEdit && limitReached && (
+              <div style={{ fontSize:10,color:T.amber,fontFamily:"'Share Tech Mono',monospace",marginTop:3 }}>
+                ⚠ DAILY LIMIT ({dailyLimit}) REACHED
+              </div>
+            )}
+          </div>
+          <button onClick={onClose} className="btn-ghost" style={{ padding:"5px 12px" }}>✕</button>
+        </div>
+
+        <div style={{ padding:20 }}>
+          {/* Direction toggle */}
+          <label className="form-label">Direction</label>
+          <div style={{ display:"flex",gap:8,marginBottom:4 }}>
+            {["Long","Short"].map(d=>(
+              <button key={d} className="dir-btn" onClick={()=>setF("direction",d)} style={{
+                background: form.direction===d ? (d==="Long"?T.greenDim:T.redDim) : T.bg,
+                color: form.direction===d ? (d==="Long"?T.green:T.red) : T.muted,
+                borderColor: form.direction===d ? (d==="Long"?T.green+"66":T.red+"66") : T.border,
+                boxShadow: form.direction===d ? `0 0 12px ${d==="Long"?T.green:T.red}22` : "none",
+              }}>{d==="Long"?"▲ LONG":"▼ SHORT"}</button>
+            ))}
+          </div>
+
+          {/* Row 1 */}
+          <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+            <div>
+              <label className="form-label">Pair</label>
+              <select className="form-input" value={form.pair} onChange={e=>setF("pair",e.target.value)}>
+                {PAIRS.map(p=><option key={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Date</label>
+              <input className="form-input" type="date" value={form.date} onChange={e=>setF("date",e.target.value)}/>
+            </div>
+            <div>
+              <label className="form-label">Entry Price</label>
+              <input className="form-input" type="number" step="any" value={form.entry} onChange={e=>setF("entry",e.target.value)} placeholder="0.00000"/>
+            </div>
+            <div>
+              <label className="form-label">Exit Price</label>
+              <input className="form-input" type="number" step="any" value={form.exit} onChange={e=>setF("exit",e.target.value)} placeholder="0.00000" disabled={form.status==="Open"}/>
+            </div>
+            <div>
+              <label className="form-label">Lot Size</label>
+              <input className="form-input" type="number" step="0.01" value={form.lots} onChange={e=>setF("lots",e.target.value)} placeholder="0.01"/>
+            </div>
+            <div>
+              <label className="form-label">Status</label>
+              <select className="form-input" value={form.status} onChange={e=>setF("status",e.target.value)}>
+                <option>Open</option><option>Closed</option>
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Session</label>
+              <select className="form-input" value={form.session} onChange={e=>setF("session",e.target.value)}>
+                {SESSIONS.map(s=><option key={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Strategy</label>
+              <select className="form-input" value={form.strategy} onChange={e=>setF("strategy",e.target.value)}>
+                {STRATEGIES.map(s=><option key={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Setup / Confluence</label>
+              <select className="form-input" value={form.setup||"None"} onChange={e=>setF("setup",e.target.value)}>
+                {SETUPS.map(s=><option key={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="form-label">Mental State</label>
+              <select className="form-input" value={form.mood||"😐 Neutral"} onChange={e=>setF("mood",e.target.value)}>
+                {MOODS.map(m=><option key={m}>{m}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <label className="form-label">Trade Notes</label>
+          <textarea className="form-input" value={form.notes} onChange={e=>setF("notes",e.target.value)} placeholder="Entry reason, market context..." rows={2} style={{ resize:"vertical" }}/>
+
+          {/* Replay */}
+          <label className="form-label">What I'd Do Differently (Replay)</label>
+          <textarea className="form-input" value={form.replay||""} onChange={e=>setF("replay",e.target.value)} placeholder="Hindsight analysis, lessons learned..." rows={2} style={{ resize:"vertical" }}/>
+
+          {/* Screenshot */}
+          <label className="form-label">Chart Screenshot</label>
+          <div style={{ display:"flex",alignItems:"center",gap:10 }}>
+            <button className="btn-ghost" onClick={()=>fileRef.current.click()} style={{ fontSize:11 }}>📎 Attach</button>
+            <input ref={fileRef} type="file" accept="image/*" style={{ display:"none" }} onChange={handleFile}/>
+            {form.screenshot && <span style={{ fontSize:10,color:T.green,fontFamily:"'Share Tech Mono',monospace" }}>✓ Image attached</span>}
+            {form.screenshot && <button className="btn-ghost" onClick={()=>setF("screenshot",null)} style={{ fontSize:10,padding:"3px 8px" }}>✕</button>}
+          </div>
+          {form.screenshot && (
+            <img src={form.screenshot} alt="chart" style={{ marginTop:8,width:"100%",maxHeight:160,objectFit:"cover",borderRadius:4,border:`1px solid ${T.border}` }}/>
+          )}
+
+          {/* P&L Preview */}
+          {preview && form.status==="Closed" && (
+            <div style={{ marginTop:16,padding:"10px 14px",background:preview.pnl>=0?T.greenDim:T.redDim,border:`1px solid ${preview.pnl>=0?T.green+"44":T.red+"44"}`,borderRadius:5,display:"flex",justifyContent:"space-between",alignItems:"center" }}>
+              <span style={{ fontSize:10,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em" }}>P&L PREVIEW</span>
+              <div style={{ display:"flex",gap:20 }}>
+                <span style={{ fontFamily:"'Share Tech Mono',monospace",fontWeight:700,color:preview.pnl>=0?T.green:T.red,fontSize:15 }}>{preview.pnl>=0?"+":""}{preview.pnl}</span>
+                <span style={{ fontFamily:"'Share Tech Mono',monospace",color:T.muted,fontSize:13 }}>{preview.pips>=0?"+":""}{preview.pips} pips</span>
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div style={{ display:"flex",gap:10,marginTop:18,justifyContent:"flex-end" }}>
+            <button className="btn-ghost" onClick={onClose}>CANCEL</button>
+            <button className="btn-primary" onClick={onSave}>{isEdit?"UPDATE TRADE":"LOG TRADE"}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   JOURNAL TAB
+═══════════════════════════════════════════════════════════════ */
+function JournalTab({ trades, onEdit, onDelete, onChart, filter, setFilter, dailyLimit, setDailyLimit }) {
+  const [expandId, setExpandId] = useState(null);
+  const visible = trades.filter(t=>filter==="All"||t.status===filter);
+
+  const today = new Date().toISOString().slice(0,10);
+  const todayTrades = trades.filter(t=>t.date===today);
+  const todayPnl = todayTrades.filter(t=>t.status==="Closed"&&calcPnl(t)).reduce((a,t)=>a+calcPnl(t).pnl,0);
+
+  return (
+    <div>
+      {/* Daily Summary */}
+      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10,marginBottom:14 }}>
+        <div className="stat-card">
+          <div style={{ fontSize:9,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em",marginBottom:6 }}>TODAY TRADES</div>
+          <div style={{ fontSize:22,fontWeight:700,fontFamily:"'Share Tech Mono',monospace",color:T.cyan }}>{todayTrades.length}</div>
+          <div style={{ fontSize:9,color:T.dim,marginTop:2,fontFamily:"'Share Tech Mono',monospace" }}>of {dailyLimit} limit</div>
+          <div style={{ marginTop:6,height:3,background:T.bg,borderRadius:2 }}>
+            <div style={{ height:"100%",width:`${Math.min((todayTrades.length/dailyLimit)*100,100)}%`,background:todayTrades.length>=dailyLimit?T.red:T.cyan,borderRadius:2,transition:"width 0.4s" }}/>
+          </div>
+        </div>
+        <div className="stat-card">
+          <div style={{ fontSize:9,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em",marginBottom:6 }}>TODAY P&L</div>
+          <div style={{ fontSize:22,fontWeight:700,fontFamily:"'Share Tech Mono',monospace",color:todayPnl>=0?T.green:T.red }}>{todayPnl>=0?"+":""}{todayPnl.toFixed(2)}</div>
+        </div>
+        <div className="stat-card">
+          <div style={{ fontSize:9,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em",marginBottom:6 }}>TOTAL TRADES</div>
+          <div style={{ fontSize:22,fontWeight:700,fontFamily:"'Share Tech Mono',monospace",color:T.text }}>{trades.length}</div>
+        </div>
+        <div className="stat-card">
+          <div style={{ fontSize:9,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em",marginBottom:4 }}>DAILY LIMIT</div>
+          <div style={{ display:"flex",alignItems:"center",gap:8 }}>
+            <button className="btn-ghost" style={{ padding:"3px 9px",fontSize:12 }} onClick={()=>setDailyLimit(l=>Math.max(1,l-1))}>−</button>
+            <span style={{ fontSize:20,fontWeight:700,fontFamily:"'Share Tech Mono',monospace",color:T.amber }}>{dailyLimit}</span>
+            <button className="btn-ghost" style={{ padding:"3px 9px",fontSize:12 }} onClick={()=>setDailyLimit(l=>l+1)}>+</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Filter */}
+      <div style={{ display:"flex",gap:6,marginBottom:12 }}>
+        {["All","Open","Closed"].map(f=>(
+          <button key={f} onClick={()=>setFilter(f)} style={{
+            background: filter===f ? T.cyan+"22" : "none",
+            border: `1px solid ${filter===f ? T.cyan : T.border}`,
+            color: filter===f ? T.cyan : T.muted,
+            padding:"5px 14px",borderRadius:4,cursor:"pointer",
+            fontFamily:"'Share Tech Mono',monospace",fontSize:10,
+            letterSpacing:"0.1em",transition:"all 0.15s",
+          }}>{f} {f!=="All"&&`(${trades.filter(t=>t.status===f).length})`}</button>
+        ))}
+      </div>
+
+      {/* Table */}
+      {visible.length===0
+        ? <div style={{ textAlign:"center",padding:"50px 0",color:T.muted,fontFamily:"'Share Tech Mono',monospace",fontSize:12,letterSpacing:"0.1em" }}>
+            — NO TRADES LOGGED —
+          </div>
+        : <div style={{ background:T.card,border:`1px solid ${T.border}`,borderRadius:6,overflow:"hidden" }}>
+            {/* Table header */}
+            <div style={{ display:"grid",gridTemplateColumns:"90px 80px 60px 80px 80px 60px 90px 80px 80px 60px",padding:"8px 14px",borderBottom:`1px solid ${T.border}`,background:T.surface }}>
+              {["DATE","PAIR","DIR","ENTRY","EXIT","LOTS","SESSION","SETUP","P&L",""].map((h,i)=>(
+                <span key={i} style={{ fontSize:9,color:T.muted,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em" }}>{h}</span>
+              ))}
+            </div>
+            {[...visible].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(t=>{
+              const r = calcPnl(t);
+              const isExpanded = expandId===t.id;
+              return (
+                <div key={t.id} className="trade-row">
+                  <div style={{ display:"grid",gridTemplateColumns:"90px 80px 60px 80px 80px 60px 90px 80px 80px 60px",padding:"9px 14px",alignItems:"center",cursor:"pointer" }}
+                    onClick={()=>setExpandId(isExpanded?null:t.id)}>
+                    <span style={{ fontSize:11,fontFamily:"'Share Tech Mono',monospace",color:T.muted }}>{t.date}</span>
+                    <span style={{ fontSize:12,fontFamily:"'Share Tech Mono',monospace",color:T.text,fontWeight:600 }}>{t.pair}</span>
+                    <span style={{ fontSize:11,fontFamily:"'Share Tech Mono',monospace",color:t.direction==="Long"?T.green:T.red,fontWeight:700 }}>{t.direction==="Long"?"▲":"▼"} {t.direction}</span>
+                    <span style={{ fontSize:11,fontFamily:"'Share Tech Mono',monospace",color:T.text }}>{t.entry}</span>
+                    <span style={{ fontSize:11,fontFamily:"'Share Tech Mono',monospace",color:T.text }}>{t.exit||"—"}</span>
+                    <span style={{ fontSize:11,fontFamily:"'Share Tech Mono',monospace",color:T.muted }}>{t.lots}</span>
+                    <span style={{ fontSize:10,fontFamily:"'Share Tech Mono',monospace",color:T.dim }}>{t.session}</span>
+                    <span style={{ fontSize:10,fontFamily:"'Share Tech Mono',monospace",color:T.muted }}>{t.setup||"—"}</span>
+                    <span style={{ fontSize:12,fontFamily:"'Share Tech Mono',monospace",fontWeight:700,color:!r?"#666":r.pnl>=0?T.green:T.red }}>
+                      {!r?<span style={{ color:T.border2,fontSize:10 }}>OPEN</span>:`${r.pnl>=0?"+":""}${r.pnl}`}
+                    </span>
+                    <span style={{ fontSize:10,color:T.dim }}>{isExpanded?"▲":"▼"}</span>
+                  </div>
+
+                  {/* Expanded row */}
+                  {isExpanded && (
+                    <div style={{ padding:"12px 14px 14px",borderTop:`1px solid ${T.border}`,background:T.bg,animation:"fadeIn 0.15s ease" }}>
+                      <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12 }}>
+                        <div>
+                          <div style={{ fontSize:9,color:T.dim,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em",marginBottom:3 }}>TRADE NOTES</div>
+                          <div style={{ fontSize:12,color:T.text,lineHeight:1.5 }}>{t.notes||<span style={{ color:T.dim }}>—</span>}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize:9,color:T.dim,fontFamily:"'Share Tech Mono',monospace",letterSpacing:"0.1em",marginBottom:3 }}>REPLAY / LESSONS</div>
+                          <div style={{ fontSize:12,color:T.text,lineHeight:1.5 }}>{t.replay||<span style={{ color:T.dim }}>—</span>}</div>
+                        </div>
+                      </div>
+                      <div style={{ display:"flex",gap:8,alignItems:"center",flexWrap:"wrap" }}>
+                        <span style={{ fontSize:10,background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,padding:"2px 8px",fontFamily:"'Share Tech Mono',monospace",color:T.muted }}>
+                          {t.strategy}
+                        </span>
+                        {t.mood && <span style={{ fontSize:11 }}>{t.mood}</span>}
+                        {r && <span style={{ fontSize:10,color:T.muted,fontFamily:"'Share Tech Mono',monospace" }}>{r.pips>=0?"+":""}{r.pips} pips</span>}
+                        <div style={{ flex:1 }}/>
+                        {t.screenshot && (
+                          <button className="btn-ghost" onClick={()=>window.open(t.screenshot)} style={{ fontSize:10,padding:"3px 10px" }}>📷 Chart</button>
+                        )}
+                        <button className="btn-ghost" onClick={()=>onChart(t.pair)} style={{ fontSize:10,padding:"3px 10px" }}>📊 TV</button>
+                        <button className="btn-ghost" onClick={()=>onEdit(t)} style={{ fontSize:10,padding:"3px 10px" }}>✏ Edit</button>
+                        <button className="btn-danger" onClick={()=>onDelete(t.id)}>✕ Del</button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+      }
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   MAIN APP
+═══════════════════════════════════════════════════════════════ */
+export default function App() {
+  const [trades,     setTrades]     = useState([]);
+  const [form,       setForm]       = useState({...emptyForm});
+  const [showForm,   setShowForm]   = useState(false);
+  const [editId,     setEditId]     = useState(null);
+  const [tab,        setTab]        = useState("journal");
+  const [filter,     setFilter]     = useState("All");
+  const [chart,      setChart]      = useState(null);
+  const [dailyLimit, setDailyLimit] = useState(3);
+
+  useEffect(()=>{
+    const saved = localStorage.getItem("tradelog_v2");
+    if (saved) try { setTrades(JSON.parse(saved)); } catch(e){}
+    const lim = localStorage.getItem("tradelog_limit");
+    if (lim) setDailyLimit(parseInt(lim)||3);
+  },[]);
+
+  useEffect(()=>{ localStorage.setItem("tradelog_v2", JSON.stringify(trades)); },[trades]);
+  useEffect(()=>{ localStorage.setItem("tradelog_limit", String(dailyLimit)); },[dailyLimit]);
+
+  const setF     = (k,v) => setForm(p=>({...p,[k]:v}));
+  const openNew  = () => { setForm({...emptyForm, date:new Date().toISOString().slice(0,10)}); setEditId(null); setShowForm(true); };
+  const openEdit = (t) => { setForm({...t}); setEditId(t.id); setShowForm(true); };
+  const closeForm= () => { setShowForm(false); setEditId(null); };
+
+  const todayTrades   = trades.filter(t=>t.date===new Date().toISOString().slice(0,10));
+  const limitReached  = todayTrades.length >= dailyLimit;
+  const preview       = calcPnl(form);
+
+  const save = () => {
+    if (!form.pair||!form.entry) { alert("Pair and Entry Price required."); return; }
+    if (!editId && limitReached) { alert(`Daily limit of ${dailyLimit} reached. Stay disciplined. 🛑`); return; }
+    const newTrade = { ...form, id: editId ?? Date.now() };
+    setTrades(prev => editId ? prev.map(t=>t.id===editId?newTrade:t) : [...prev, newTrade]);
+    closeForm();
+  };
+
+  const del = (id) => { if (confirm("Delete this trade?")) setTrades(p=>p.filter(t=>t.id!==id)); };
+
+  return (
+    <div style={{ minHeight:"100vh", background:T.bg, color:T.text }}>
+      <GlobalStyle/>
+
+      {/* Chart Modal */}
+      {chart && <ChartModal pair={chart} onClose={()=>setChart(null)}/>}
+
+      {/* Trade Form Modal */}
+      {showForm && (
+        <TradeForm form={form} setF={setF} onSave={save} onClose={closeForm}
+          isEdit={!!editId} preview={preview} limitReached={limitReached} dailyLimit={dailyLimit}/>
+      )}
+
+      {/* Header */}
+      <div style={{ background:T.surface, borderBottom:`1px solid ${T.border}`, padding:"0 24px", position:"sticky", top:0, zIndex:50 }}>
+        <div style={{ display:"flex",justifyContent:"space-between",alignItems:"center",height:52 }}>
+          {/* Logo */}
+          <div style={{ display:"flex",alignItems:"center",gap:12 }}>
+            <div style={{ width:28,height:28,background:T.cyan,borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:`0 0 14px ${T.cyan}66` }}>
+              <span style={{ fontSize:14 }}>◈</span>
+            </div>
+            <div>
+              <div style={{ fontFamily:"'Rajdhani',sans-serif",fontWeight:700,fontSize:16,color:T.white,letterSpacing:"0.08em" }}>TRADELOG</div>
+              <div style={{ fontFamily:"'Share Tech Mono',monospace",fontSize:8,color:T.muted,letterSpacing:"0.15em",marginTop:-2 }}>TERMINAL v2</div>
+            </div>
+          </div>
+
+          {/* Tabs */}
+          <div style={{ display:"flex",alignItems:"center",height:"100%" }}>
+            {TABS.map(t=>(
+              <button key={t} className={`tab-btn ${tab===t?"active":""}`} onClick={()=>setTab(t)}>
+                {t.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          {/* Actions */}
+          <div style={{ display:"flex",gap:8,alignItems:"center" }}>
+            <button className="btn-ghost" onClick={()=>exportCSV(trades)} style={{ fontSize:10,padding:"6px 12px" }}>↓ CSV</button>
+            <button className="btn-primary" onClick={openNew} style={{ padding:"7px 16px",fontSize:11 }}>+ LOG TRADE</button>
+          </div>
+        </div>
+      </div>
+
+      {/* Ticker */}
+      <Ticker/>
+
+      {/* Main Content */}
+      <div style={{ maxWidth:1200,margin:"0 auto",padding:"20px 20px" }}>
+        {tab==="journal" && (
+          <div className="fade-in">
+            <JournalTab trades={trades} onEdit={openEdit} onDelete={del} onChart={setChart}
+              filter={filter} setFilter={setFilter} dailyLimit={dailyLimit} setDailyLimit={setDailyLimit}/>
+          </div>
+        )}
+        {tab==="analytics" && (
+          <div className="fade-in">
+            <Analytics trades={trades} setChart={setChart}/>
+          </div>
+        )}
+        {tab==="calculator" && (
+          <div className="fade-in">
+            <Calculator/>
+          </div>
+        )}
+        {tab==="calendar" && (
+          <div className="fade-in">
+            <CalendarTab/>
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div style={{ textAlign:"center",padding:"20px 0 32px",borderTop:`1px solid ${T.border}`,marginTop:20 }}>
+        <span style={{ fontFamily:"'Share Tech Mono',monospace",fontSize:10,color:T.dim,letterSpacing:"0.12em" }}>
+          TRADELOG TERMINAL — NAIROBI, EAT — {new Date().getFullYear()}
+        </span>
+      </div>
     </div>
   );
 }
