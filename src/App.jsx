@@ -379,6 +379,270 @@ function PairBars({data}) {
 }
 
 /* ═══════════════════════════════════════════════
+   RISK CALCULATOR
+═══════════════════════════════════════════════ */
+function RiskCalc() {
+  const [balance,   setBalance]   = useState("10000");
+  const [riskPct,   setRiskPct]   = useState("1");
+  const [entry,     setEntry]     = useState("");
+  const [sl,        setSl]        = useState("");
+  const [tp,        setTp]        = useState("");
+  const [pair,      setPair]      = useState("EUR/USD");
+
+  const bal   = parseFloat(balance)  || 0;
+  const rPct  = parseFloat(riskPct)  || 0;
+  const ent   = parseFloat(entry)    || 0;
+  const stop  = parseFloat(sl)       || 0;
+  const take  = parseFloat(tp)       || 0;
+
+  const riskAmt   = bal * (rPct / 100);
+  const pipSl     = stop && ent ? Math.abs(ent - stop) : 0;
+  const pipTp     = take && ent ? Math.abs(take - ent) : 0;
+  const rrRatio   = pipSl > 0 && pipTp > 0 ? (pipTp / pipSl).toFixed(2) : "—";
+  const lotSize   = pipSl > 0 ? (riskAmt / (pipSl * 10000)).toFixed(2) : "—";
+  const potProfit = pipSl > 0 && pipTp > 0 ? (riskAmt * (pipTp / pipSl)).toFixed(2) : "—";
+
+  const Field = ({label, value, onChange, placeholder}) => (
+    <div style={{marginBottom:14}}>
+      <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",
+        color:T.muted,marginBottom:6}}>{label}</div>
+      <input value={value} onChange={e=>onChange(e.target.value)}
+        placeholder={placeholder}
+        style={{
+          width:"100%",background:T.surface,border:`1px solid ${T.border2}`,
+          borderRadius:9,padding:"10px 13px",fontSize:13,
+          color:T.white,fontFamily:"'IBM Plex Mono',monospace",outline:"none",
+          transition:"border-color .15s",
+        }}
+        onFocus={e=>e.target.style.borderColor=T.gold}
+        onBlur={e=>e.target.style.borderColor=T.border2}
+      />
+    </div>
+  );
+
+  return (
+    <div>
+      <div className="fu" style={{marginBottom:20}}>
+        <h1 className="syne" style={{fontSize:21,fontWeight:800,color:T.white}}>Risk Calculator</h1>
+        <p style={{fontSize:12,color:T.muted,marginTop:3}}>Position sizing & risk management</p>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        {/* Inputs */}
+        <div className="fu1 card" style={{padding:"22px 22px"}}>
+          <div className="section-hd" style={{marginBottom:18}}>
+            <span className="sdot" style={{background:T.cyan}}/>
+            Trade Parameters
+          </div>
+
+          {/* Pair selector */}
+          <div style={{marginBottom:14}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",
+              color:T.muted,marginBottom:6}}>Instrument</div>
+            <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+              {["EUR/USD","GBP/USD","XAU/USD","BTC/USD","USD/JPY"].map(p=>(
+                <button key={p} onClick={()=>setPair(p)} style={{
+                  padding:"5px 10px",borderRadius:7,fontSize:11,fontWeight:600,cursor:"pointer",
+                  fontFamily:"'IBM Plex Mono',monospace",border:`1px solid ${pair===p?T.gold:T.border}`,
+                  background:pair===p?T.goldGlow:"none",color:pair===p?T.gold:T.muted,
+                  transition:"all .15s",
+                }}>{p}</button>
+              ))}
+            </div>
+          </div>
+
+          <Field label="Account Balance ($)" value={balance} onChange={setBalance} placeholder="10000"/>
+          <Field label="Risk %" value={riskPct} onChange={setRiskPct} placeholder="1"/>
+          <Field label="Entry Price" value={entry} onChange={setEntry} placeholder="1.0850"/>
+          <Field label="Stop Loss" value={sl} onChange={setSl} placeholder="1.0800"/>
+          <Field label="Take Profit" value={tp} onChange={setTp} placeholder="1.0950"/>
+        </div>
+
+        {/* Results */}
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div className="fu2 gold-card" style={{padding:"22px"}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:T.muted,marginBottom:8}}>Risk Amount</div>
+            <div className="mono" style={{fontSize:32,fontWeight:700,color:T.red}}>
+              ${riskAmt.toFixed(2)}
+            </div>
+            <div style={{fontSize:11,color:T.muted,marginTop:4}}>{riskPct}% of ${parseFloat(balance||0).toLocaleString()}</div>
+          </div>
+
+          <div className="fu2 card" style={{padding:"20px"}}>
+            <div style={{fontSize:10,fontWeight:700,letterSpacing:".1em",textTransform:"uppercase",color:T.muted,marginBottom:8}}>Lot Size</div>
+            <div className="mono" style={{fontSize:28,fontWeight:700,color:T.cyan}}>{lotSize}</div>
+            <div style={{fontSize:11,color:T.muted,marginTop:4}}>Standard lots ({pair})</div>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+            <div className="fu3 card" style={{padding:"18px"}}>
+              <div style={{fontSize:9,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:T.muted,marginBottom:6}}>R:R Ratio</div>
+              <div className="mono" style={{fontSize:22,fontWeight:700,color:T.gold}}>{rrRatio}</div>
+            </div>
+            <div className="fu3 card" style={{padding:"18px"}}>
+              <div style={{fontSize:9,fontWeight:700,letterSpacing:".08em",textTransform:"uppercase",color:T.muted,marginBottom:6}}>Pot. Profit</div>
+              <div className="mono" style={{fontSize:22,fontWeight:700,color:T.green}}>
+                {potProfit!=="—"?`+$${potProfit}`:"—"}
+              </div>
+            </div>
+          </div>
+
+          <div className="fu4 card" style={{padding:"18px 20px"}}>
+            <div className="section-hd" style={{marginBottom:12,fontSize:12}}>
+              <span className="sdot" style={{background:T.green}}/>
+              Pip Summary
+            </div>
+            {[
+              {label:"SL Distance",val:pipSl?(pipSl*10000).toFixed(1)+" pips":"—",color:T.red},
+              {label:"TP Distance",val:pipTp?(pipTp*10000).toFixed(1)+" pips":"—",color:T.green},
+            ].map((r,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",
+                padding:"6px 0",borderBottom:`1px solid ${i<1?T.border:"transparent"}`}}>
+                <span style={{fontSize:12,color:T.muted}}>{r.label}</span>
+                <span className="mono" style={{fontSize:12,fontWeight:600,color:r.color}}>{r.val}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   TRADE CALENDAR
+═══════════════════════════════════════════════ */
+function TradeCalendar() {
+  const [month] = useState(4); // May = index 4
+  const year = 2025;
+  const monthName = "May 2025";
+
+  // Map trade data to days
+  const tradesByDay = {
+    1: [{pnl:310,count:1}],
+    2: [{pnl:290,count:1}],
+    6: [{pnl:-143,count:1}],
+    7: [{pnl:192,count:1}],
+    8: [{pnl:-110,count:1}],
+    12: [{pnl:166,count:1}],
+    14: [{pnl:245,count:1}],
+    15: [{pnl:108,count:1}],
+  };
+
+  // May 2025 starts on Thursday (day 4, 0=Sun)
+  const firstDay = 4;
+  const daysInMonth = 31;
+  const weeks = [];
+  let day = 1 - firstDay;
+  for (let w = 0; w < 6; w++) {
+    const week = [];
+    for (let d = 0; d < 7; d++) {
+      week.push(day > 0 && day <= daysInMonth ? day : null);
+      day++;
+    }
+    weeks.push(week);
+    if (day > daysInMonth) break;
+  }
+
+  const monthStats = Object.values(tradesByDay);
+  const totalPnl = monthStats.reduce((s,d)=>s+d[0].pnl,0);
+  const tradeDays = monthStats.length;
+  const winDays = monthStats.filter(d=>d[0].pnl>0).length;
+
+  return (
+    <div>
+      <div className="fu" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:20}}>
+        <div>
+          <h1 className="syne" style={{fontSize:21,fontWeight:800,color:T.white}}>Trade Calendar</h1>
+          <p style={{fontSize:12,color:T.muted,marginTop:3}}>Daily P&L overview · {monthName}</p>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <button className="btn btn-ghost" style={{fontSize:11.5,padding:"6px 12px"}}>◀</button>
+          <span className="mono" style={{fontSize:12,color:T.text,padding:"6px 12px",
+            background:T.surface,border:`1px solid ${T.border}`,borderRadius:8}}>{monthName}</span>
+          <button className="btn btn-ghost" style={{fontSize:11.5,padding:"6px 12px"}}>▶</button>
+        </div>
+      </div>
+
+      {/* Month summary */}
+      <div className="fu1" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:14}}>
+        {[
+          {label:"Month P&L",value:`${totalPnl>=0?"+":""}$${totalPnl}`,color:totalPnl>=0?T.green:T.red},
+          {label:"Trade Days",value:`${tradeDays}`,color:T.cyan,sub:"active days"},
+          {label:"Win Days",value:`${winDays}/${tradeDays}`,color:T.gold,sub:`${Math.round((winDays/tradeDays)*100)}% win rate`},
+        ].map((s,i)=>(
+          <div key={i} className="card" style={{padding:"16px 20px"}}>
+            <div style={{fontSize:10,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase",color:T.muted,marginBottom:7}}>{s.label}</div>
+            <div className="mono" style={{fontSize:22,fontWeight:700,color:s.color}}>{s.value}</div>
+            {s.sub&&<div style={{fontSize:11,color:T.muted,marginTop:4}}>{s.sub}</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* Calendar grid */}
+      <div className="fu2 card" style={{padding:"20px"}}>
+        {/* Day headers */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:8}}>
+          {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=>(
+            <div key={d} style={{textAlign:"center",fontSize:10,fontWeight:700,
+              letterSpacing:".08em",textTransform:"uppercase",color:T.muted,padding:"4px 0"}}>{d}</div>
+          ))}
+        </div>
+        {/* Weeks */}
+        {weeks.map((week,wi)=>(
+          <div key={wi} style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4,marginBottom:4}}>
+            {week.map((d,di)=>{
+              const trades = d ? tradesByDay[d] : null;
+              const pnl = trades ? trades[0].pnl : null;
+              const isToday = d === 14; // highlight a day
+              return (
+                <div key={di} style={{
+                  minHeight:58,borderRadius:10,padding:"7px 8px",
+                  background: pnl!==null ? (pnl>=0?T.greenDim:T.redDim) : d?T.surface:"transparent",
+                  border:`1px solid ${pnl!==null?(pnl>=0?T.green+"55":T.red+"55"):d?T.border:"transparent"}`,
+                  cursor: d ? "pointer" : "default",
+                  transition:"border-color .15s,background .15s",
+                  outline: isToday ? `2px solid ${T.gold}` : "none",
+                }}>
+                  {d && (
+                    <>
+                      <div style={{fontSize:11,fontWeight:600,color:pnl!==null?T.white:T.muted}}>{d}</div>
+                      {pnl !== null && (
+                        <div className="mono" style={{
+                          fontSize:11,fontWeight:700,marginTop:4,
+                          color:pnl>=0?T.green:T.red,
+                        }}>
+                          {pnl>=0?"+":""}${pnl}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+
+        {/* Legend */}
+        <div style={{display:"flex",gap:16,marginTop:12,paddingTop:12,borderTop:`1px solid ${T.border}`}}>
+          {[
+            {color:T.green,label:"Profit day"},
+            {color:T.red,label:"Loss day"},
+            {color:T.muted,label:"No trades"},
+          ].map((l,i)=>(
+            <div key={i} style={{display:"flex",alignItems:"center",gap:6}}>
+              <div style={{width:10,height:10,borderRadius:3,background:l.color==="muted"?T.surface:l.color==="green"?T.greenDim:T.redDim,
+                border:`1px solid ${l.color}`}}/>
+              <span style={{fontSize:11,color:T.muted}}>{l.label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
    APP
 ═══════════════════════════════════════════════ */
 export default function TradeEdgeDashboard() {
@@ -737,22 +1001,211 @@ export default function TradeEdgeDashboard() {
             </div>
           )}
 
-          {/* Other tabs */}
-          {tab!=="dashboard" && (
-            <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:360,gap:14}}>
-              <div style={{
-                width:60,height:60,borderRadius:16,
-                background:T.goldGlow,border:`1px solid ${T.gold}44`,
-                display:"flex",alignItems:"center",justifyContent:"center",
-              }}>
-                <Icon d={NAV.find(n=>n.id===tab)?.d} size={26} color={T.gold}/>
+          {/* ══════════ JOURNAL TAB ══════════ */}
+          {tab==="journal" && (
+            <div>
+              <div className="fu" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:20}}>
+                <div>
+                  <h1 className="syne" style={{fontSize:21,fontWeight:800,color:T.white}}>Trade Journal</h1>
+                  <p style={{fontSize:12,color:T.muted,marginTop:3}}>{TRADES.length} trades logged · May 2025</p>
+                </div>
+                <button className="btn btn-gold" style={{fontSize:12.5}}>+ Log Trade</button>
               </div>
-              <div className="syne" style={{fontSize:20,fontWeight:700,color:T.white}}>
-                {NAV.find(n=>n.id===tab)?.label}
+
+              {/* Search / filter bar */}
+              <div className="fu1 card" style={{padding:"12px 16px",marginBottom:14,display:"flex",gap:10,alignItems:"center"}}>
+                <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={T.muted} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <span style={{fontSize:12,color:T.muted}}>Search trades, pairs, strategies…</span>
+                <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+                  {["All","Long","Short"].map(f=>(
+                    <button key={f} className="filter-btn" style={{
+                      background:f==="All"?T.goldGlow:"none",
+                      borderColor:f==="All"?T.gold:T.border,
+                      color:f==="All"?T.gold:T.muted,
+                    }}>{f}</button>
+                  ))}
+                </div>
               </div>
-              <p style={{color:T.muted,fontSize:13}}>Integrate into your App.jsx to activate this section</p>
+
+              {/* Journal entries */}
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {TRADES.map((t,i)=>(
+                  <div key={t.id} className={`card fu${Math.min(i+1,4)}`} style={{
+                    padding:"16px 20px",
+                    borderLeft:`3px solid ${t.pnl>=0?T.green:T.red}`,
+                    borderRadius:"0 14px 14px 0",
+                  }}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+                      {/* Left: pair + meta */}
+                      <div style={{display:"flex",alignItems:"center",gap:12}}>
+                        <div>
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                            <span className="mono" style={{fontSize:15,fontWeight:700,color:T.white}}>{t.pair}</span>
+                            <span className="pill" style={{
+                              background:t.dir==="Long"?T.greenDim:T.redDim,
+                              color:t.dir==="Long"?T.green:T.red,
+                            }}>{t.dir}</span>
+                            <span style={{fontSize:10.5,color:T.muted,background:T.surface,padding:"2px 8px",borderRadius:6,border:`1px solid ${T.border}`}}>
+                              {t.strategy}
+                            </span>
+                          </div>
+                          <div style={{display:"flex",gap:16,fontSize:11,color:T.muted}}>
+                            <span>Entry <span className="mono" style={{color:T.text}}>{t.entry}</span></span>
+                            <span>Exit <span className="mono" style={{color:T.text}}>{t.exit}</span></span>
+                            <span>Lots <span className="mono" style={{color:T.text}}>{t.lots}</span></span>
+                            <span>Session <span style={{color:T.text}}>{t.session}</span></span>
+                          </div>
+                        </div>
+                      </div>
+                      {/* Right: P&L */}
+                      <div style={{textAlign:"right"}}>
+                        <div className="mono" style={{fontSize:20,fontWeight:700,color:t.pnl>=0?T.green:T.red}}>
+                          {t.pnl>=0?"+":""}${t.pnl}
+                        </div>
+                        <div className="mono" style={{fontSize:11,color:T.muted}}>{t.pips>=0?"+":""}{t.pips} pips</div>
+                      </div>
+                    </div>
+                    {/* Notes placeholder */}
+                    <div style={{marginTop:12,paddingTop:10,borderTop:`1px solid ${T.border}`,
+                      fontSize:11.5,color:T.muted,fontStyle:"italic"}}>
+                      📝 No notes added yet — click to annotate this trade
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
+
+          {/* ══════════ ANALYTICS TAB ══════════ */}
+          {tab==="analytics" && (
+            <div>
+              <div className="fu" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",marginBottom:20}}>
+                <div>
+                  <h1 className="syne" style={{fontSize:21,fontWeight:800,color:T.white}}>Analytics</h1>
+                  <p style={{fontSize:12,color:T.muted,marginTop:3}}>Performance breakdown · May 2025</p>
+                </div>
+                <button className="btn btn-ghost" style={{fontSize:11.5,padding:"6px 12px"}}>↓ Export Report</button>
+              </div>
+
+              {/* Top stats row */}
+              <div className="fu1" style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:14}}>
+                {[
+                  {label:"Best Trade",value:"+$290",sub:"BTC/USD · Breakout",color:T.green},
+                  {label:"Worst Trade",value:"-$143",sub:"XAU/USD · Trend Follow",color:T.red},
+                  {label:"Avg Hold",value:"4.2h",sub:"per trade avg",color:T.cyan},
+                ].map((s,i)=>(
+                  <div key={i} className="card" style={{padding:"18px 20px"}}>
+                    <div style={{fontSize:10,fontWeight:600,letterSpacing:".1em",textTransform:"uppercase",color:T.muted,marginBottom:8}}>{s.label}</div>
+                    <div className="mono" style={{fontSize:22,fontWeight:700,color:s.color}}>{s.value}</div>
+                    <div style={{fontSize:11,color:T.muted,marginTop:6}}>{s.sub}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Strategy breakdown */}
+              <div className="fu2 card" style={{padding:"18px 20px",marginBottom:14}}>
+                <div className="section-hd" style={{marginBottom:16}}>
+                  <span className="sdot" style={{background:T.gold,boxShadow:`0 0 6px ${T.gold}`}}/>
+                  Strategy Performance
+                </div>
+                {[
+                  {name:"ICT/SMC",trades:2,pnl:437,wins:2},
+                  {name:"Breakout",trades:2,pnl:398,wins:2},
+                  {name:"Trend Follow",trades:1,pnl:-143,wins:0},
+                  {name:"Swing",trades:1,pnl:166,wins:1},
+                  {name:"Scalp",trades:1,pnl:-110,wins:0},
+                ].map((s,i)=>{
+                  const wr=Math.round((s.wins/s.trades)*100);
+                  return (
+                    <div key={i} style={{
+                      display:"flex",alignItems:"center",gap:12,
+                      padding:"10px 0",borderBottom:`1px solid ${i<4?T.border:"transparent"}`,
+                    }}>
+                      <div style={{width:110,fontSize:12.5,fontWeight:600,color:T.text}}>{s.name}</div>
+                      <div style={{flex:1}}>
+                        <div style={{height:6,borderRadius:3,background:T.border,overflow:"hidden"}}>
+                          <div style={{
+                            height:"100%",borderRadius:3,
+                            width:`${wr}%`,
+                            background:s.pnl>=0?`linear-gradient(90deg,${T.cyan},${T.green})`:`linear-gradient(90deg,${T.red},#f0455055)`,
+                            transition:`width 1s ${i*.1}s ease`,
+                          }}/>
+                        </div>
+                      </div>
+                      <div className="mono" style={{width:36,fontSize:11,color:T.muted,textAlign:"center"}}>{wr}%</div>
+                      <div style={{width:30,fontSize:11,color:T.muted,textAlign:"center"}}>{s.trades}T</div>
+                      <div className="mono" style={{width:60,fontSize:12,fontWeight:600,textAlign:"right",color:s.pnl>=0?T.green:T.red}}>
+                        {s.pnl>=0?"+":""}${s.pnl}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Session + Direction breakdown */}
+              <div className="fu3" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                <div className="card" style={{padding:"18px 20px"}}>
+                  <div className="section-hd" style={{marginBottom:16}}>
+                    <span className="sdot" style={{background:T.cyan}}/>
+                    Session Breakdown
+                  </div>
+                  {[
+                    {session:"London",trades:3,pnl:301},
+                    {session:"New York",trades:2,pnl:398},
+                    {session:"Asian",trades:2,pnl:49},
+                  ].map((s,i)=>(
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",
+                      padding:"9px 0",borderBottom:`1px solid ${i<2?T.border:"transparent"}`}}>
+                      <span style={{fontSize:12.5,color:T.text}}>{s.session}</span>
+                      <div style={{display:"flex",gap:12,alignItems:"center"}}>
+                        <span className="mono" style={{fontSize:11,color:T.muted}}>{s.trades} trades</span>
+                        <span className="mono" style={{fontSize:12,fontWeight:600,color:s.pnl>=0?T.green:T.red}}>
+                          {s.pnl>=0?"+":""}${s.pnl}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="card" style={{padding:"18px 20px"}}>
+                  <div className="section-hd" style={{marginBottom:16}}>
+                    <span className="sdot" style={{background:T.green}}/>
+                    Long vs Short
+                  </div>
+                  {[
+                    {dir:"Long",trades:TRADES.filter(t=>t.dir==="Long").length,pnl:TRADES.filter(t=>t.dir==="Long").reduce((s,t)=>s+t.pnl,0)},
+                    {dir:"Short",trades:TRADES.filter(t=>t.dir==="Short").length,pnl:TRADES.filter(t=>t.dir==="Short").reduce((s,t)=>s+t.pnl,0)},
+                  ].map((d,i)=>(
+                    <div key={i} style={{padding:"12px 0",borderBottom:`1px solid ${i<1?T.border:"transparent"}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",marginBottom:8}}>
+                        <span style={{fontSize:12.5,fontWeight:600,color:d.dir==="Long"?T.green:T.red}}>{d.dir}</span>
+                        <span className="mono" style={{fontSize:12,fontWeight:700,color:d.pnl>=0?T.green:T.red}}>
+                          {d.pnl>=0?"+":""}${d.pnl}
+                        </span>
+                      </div>
+                      <div style={{height:5,borderRadius:3,background:T.border,overflow:"hidden"}}>
+                        <div style={{
+                          height:"100%",borderRadius:3,
+                          width:`${Math.round((d.trades/TRADES.length)*100)}%`,
+                          background:d.dir==="Long"?T.green:T.red,
+                          transition:"width 1s ease",
+                        }}/>
+                      </div>
+                      <div style={{fontSize:10.5,color:T.muted,marginTop:5}}>{d.trades} trades · {Math.round((d.trades/TRADES.length)*100)}%</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ══════════ RISK CALCULATOR TAB ══════════ */}
+          {tab==="calculator" && <RiskCalc />}
+
+          {/* ══════════ CALENDAR TAB ══════════ */}
+          {tab==="calendar" && <TradeCalendar />}
         </main>
 
         {/* Footer */}
